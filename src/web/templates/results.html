@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Extraction Results - Lease Agreement Data Extraction</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.24.1/themes/prism.min.css" rel="stylesheet">
+    <style>
+        .section-card {
+            margin-bottom: 20px;
+        }
+        .field-row {
+            padding: 8px 0;
+            border-bottom: 1px solid #f0f0f0;
+        }
+        .field-row:last-child {
+            border-bottom: none;
+        }
+        .field-label {
+            font-weight: 500;
+            color: #666;
+        }
+        .field-value {
+            color: #333;
+        }
+        .empty-value {
+            color: #999;
+            font-style: italic;
+        }
+        .completion-bar {
+            height: 6px;
+            border-radius: 3px;
+        }
+        .json-container {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .summary-stats {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        .loading-container {
+            text-align: center;
+            padding: 50px;
+        }
+        .error-container {
+            background-color: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+            padding: 20px;
+            border-radius: 5px;
+        }
+        .metadata-card {
+            background-color: #f8f9fa;
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+        <div class="container">
+            <a class="navbar-brand" href="/">
+                <i class="fas fa-file-contract me-2"></i>
+                Lease Agreement Data Extraction
+            </a>
+            <div class="navbar-nav ms-auto">
+                <a href="/" class="btn btn-outline-light btn-sm">
+                    <i class="fas fa-plus"></i> New Extraction
+                </a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        <!-- Loading State -->
+        <div id="loadingContainer" class="loading-container">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <h5 class="mt-3">Loading extraction results...</h5>
+        </div>
+
+        <!-- Error State -->
+        <div id="errorContainer" class="error-container" style="display: none;">
+            <h5><i class="fas fa-exclamation-triangle me-2"></i>Error</h5>
+            <p id="errorMessage"></p>
+            <a href="/" class="btn btn-primary">
+                <i class="fas fa-arrow-left me-2"></i>Back to Upload
+            </a>
+        </div>
+
+        <!-- Success State -->
+        <div id="resultsContainer" style="display: none;">
+            
+            <!-- Summary Statistics -->
+            <div class="card summary-stats mb-4">
+                <div class="card-body">
+                    <div class="row align-items-center">
+                        <div class="col-md-8">
+                            <h4 class="mb-1">
+                                <i class="fas fa-check-circle me-2"></i>
+                                <span id="extractionStatus">Extraction Complete</span>
+                            </h4>
+                            <p class="mb-0" id="fileName">Processing: filename.pdf</p>
+                        </div>
+                        <div class="col-md-4 text-end">
+                            <div class="btn-group">
+                                <button class="btn btn-light btn-sm" onclick="downloadJSON()">
+                                    <i class="fas fa-download me-1"></i>Download JSON
+                                </button>
+                                <button class="btn btn-light btn-sm" onclick="copyToClipboard()">
+                                    <i class="fas fa-copy me-1"></i>Copy Data
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Quick Stats -->
+            <div class="row mb-4">
+                <div class="col-md-3 col-sm-6 mb-3">
+                    <div class="card">
+                        <div class="card-body text-center">
+                            <i class="fas fa-chart-pie fa-2x text-primary mb-2"></i>
+                            <h5 id="overallCompletion">0%</h5>
+                            <small class="text-muted">Data Extracted</small>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3 col-sm-6 mb-3">
+                    <div class="card">
+                        <div class="card-body text-center">
+                            <i class="fas fa-clock fa-2x text-success mb-2"></i>
+                            <h5 id="processingTime">0s</h5>
+                            <small class="text-muted">Processing Time</small>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3 col-sm-6 mb-3">
+                    <div class="card">
+                        <div class="card-body text-center">
+                            <i class="fas fa-robot fa-2x text-info mb-2"></i>
+                            <h5 id="llmProvider">OpenAI</h5>
+                            <small class="text-muted">LLM Provider</small>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3 col-sm-6 mb-3">
+                    <div class="card">
+                        <div class="card-body text-center">
+                            <i class="fas fa-database fa-2x text-warning mb-2"></i>
+                            <h5 id="totalFields">0</h5>
+                            <small class="text-muted">Total Fields</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Data Sections -->
+            <div class="row">
+                <div class="col-lg-8">
+                    <div id="dataSections">
+                        <!-- Dynamic data sections will be inserted here -->
+                    </div>
+                </div>
+                <div class="col-lg-4">
+                    <!-- Section Completion Summary -->
+                    <div class="card metadata-card mb-4">
+                        <div class="card-header">
+                            <h6 class="mb-0">
+                                <i class="fas fa-chart-bar me-2"></i>Section Completion
+                            </h6>
+                        </div>
+                        <div class="card-body" id="sectionSummary">
+                            <!-- Section completion bars will be inserted here -->
+                        </div>
+                    </div>
+
+                    <!-- Metadata -->
+                    <div class="card metadata-card">
+                        <div class="card-header">
+                            <h6 class="mb-0">
+                                <i class="fas fa-info-circle me-2"></i>Processing Details
+                            </h6>
+                        </div>
+                        <div class="card-body" id="metadataContent">
+                            <!-- Metadata will be inserted here -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Raw JSON Data -->
+            <div class="card mt-4">
+                <div class="card-header">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <h6 class="mb-0">
+                            <i class="fas fa-code me-2"></i>Raw JSON Data
+                        </h6>
+                        <div class="btn-group btn-group-sm">
+                            <button class="btn btn-outline-secondary" onclick="toggleJsonView()">
+                                <i class="fas fa-eye me-1"></i><span id="jsonToggleText">Show</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-body json-container" id="jsonContainer" style="display: none;">
+                    <pre><code class="language-json" id="jsonData"></code></pre>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.24.1/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.24.1/components/prism-json.min.js"></script>
+    <script>
+        // Global variables
+        let extractionData = null;
+        let taskId = new URLSearchParams(window.location.search).get('task_id');
+
+        // Section display names and icons
+        const sectionConfig = {
+            'agreement_details': { name: 'Agreement Details', icon: 'fas fa-file-contract', color: 'primary' },
+            'parties': { name: 'Parties', icon: 'fas fa-users', color: 'success' },
+            'unit_details': { name: 'Unit Details', icon: 'fas fa-building', color: 'info' },
+            'lease_terms': { name: 'Lease Terms', icon: 'fas fa-calendar-alt', color: 'warning' },
+            'financials': { name: 'Financials', icon: 'fas fa-dollar-sign', color: 'danger' },
+            'parking_cam': { name: 'Parking & CAM', icon: 'fas fa-car', color: 'secondary' },
+            'property_tax': { name: 'Property Tax', icon: 'fas fa-receipt', color: 'dark' },
+            'miscellaneous': { name: 'Miscellaneous', icon: 'fas fa-ellipsis-h', color: 'muted' }
+        };
+
+        // Load results on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            if (taskId) {
+                loadResults();
+            } else {
+                showError('No task ID provided');
+            }
+        });
+
+        function loadResults() {
+            fetch(`/result/${taskId}`)
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    extractionData = data;
+                    if (data.success) {
+                        displayResults(data);
+                    } else {
+                        showError(data.error || 'Extraction failed');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error loading results:', error);
+                    showError('Failed to load results: ' + error.message);
+                });
+        }
+
+        function showError(message) {
+            document.getElementById('loadingContainer').style.display = 'none';
+            document.getElementById('errorContainer').style.display = 'block';
+            document.getElementById('errorMessage').textContent = message;
+        }
+
+        function displayResults(data) {
+            document.getElementById('loadingContainer').style.display = 'none';
+            document.getElementById('resultsContainer').style.display = 'block';
+
+            // Update summary information
+            document.getElementById('fileName').textContent = `File: ${data.filename || 'Unknown'}`;
+            document.getElementById('processingTime').textContent = `${data.processing_time?.toFixed(2) || 0}s`;
+            document.getElementById('llmProvider').textContent = data.llm_provider || 'Unknown';
+
+            if (data.data) {
+                // Display extracted data
+                displayExtractedData(data.data);
+                
+                // Display summary statistics
+                if (data.summary) {
+                    displaySummaryStats(data.summary);
+                }
+            }
+
+            // Display metadata
+            displayMetadata(data);
+
+            // Prepare JSON data
+            prepareJsonData(data);
+        }
+
+        function displayExtractedData(data) {
+            const container = document.getElementById('dataSections');
+            container.innerHTML = '';
+
+            Object.keys(sectionConfig).forEach(sectionKey => {
+                const sectionData = data[sectionKey];
+                if (sectionData) {
+                    const sectionHtml = createSectionCard(sectionKey, sectionData);
+                    container.innerHTML += sectionHtml;
+                }
+            });
+        }
+
+        function createSectionCard(sectionKey, sectionData) {
+            const config = sectionConfig[sectionKey];
+            const fieldsHtml = createFieldsHtml(sectionData);
+            
+            return `
+                <div class="card section-card">
+                    <div class="card-header bg-${config.color} text-white">
+                        <h6 class="mb-0">
+                            <i class="${config.icon} me-2"></i>${config.name}
+                        </h6>
+                    </div>
+                    <div class="card-body">
+                        ${fieldsHtml}
+                    </div>
+                </div>
+            `;
+        }
+
+        function createFieldsHtml(data, prefix = '') {
+            let html = '';
+            
+            Object.entries(data).forEach(([key, value]) => {
+                const displayKey = prefix ? `${prefix}.${key}` : key;
+                const formattedKey = formatFieldName(key);
+                
+                if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+                    // Nested object
+                    html += `
+                        <div class="field-row">
+                            <div class="field-label mb-2"><strong>${formattedKey}</strong></div>
+                            <div class="ms-3">
+                                ${createFieldsHtml(value, displayKey)}
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    // Simple field
+                    const displayValue = formatFieldValue(value);
+                    const valueClass = value === null || value === '' ? 'empty-value' : 'field-value';
+                    
+                    html += `
+                        <div class="field-row">
+                            <div class="row">
+                                <div class="col-sm-4 field-label">${formattedKey}</div>
+                                <div class="col-sm-8 ${valueClass}">${displayValue}</div>
+                            </div>
+                        </div>
+                    `;
+                }
+            });
+            
+            return html;
+        }
+
+        function formatFieldName(key) {
+            return key.replace(/_/g, ' ')
+                     .replace(/\b\w/g, l => l.toUpperCase());
+        }
+
+        function formatFieldValue(value) {
+            if (value === null || value === undefined) {
+                return '<em>Not specified</em>';
+            }
+            if (value === '') {
+                return '<em>Empty</em>';
+            }
+            if (Array.isArray(value)) {
+                return value.length > 0 ? value.join(', ') : '<em>None</em>';
+            }
+            if (typeof value === 'boolean') {
+                return value ? '<span class="badge bg-success">Yes</span>' : '<span class="badge bg-secondary">No</span>';
+            }
+            if (typeof value === 'number') {
+                return value.toLocaleString();
+            }
+            return String(value);
+        }
+
+        function displaySummaryStats(summary) {
+            const overall = summary.overall;
+            if (overall) {
+                document.getElementById('overallCompletion').textContent = `${overall.completion_rate}%`;
+                document.getElementById('totalFields').textContent = overall.total_fields;
+            }
+
+            // Create section completion bars
+            const container = document.getElementById('sectionSummary');
+            container.innerHTML = '';
+
+            Object.keys(sectionConfig).forEach(sectionKey => {
+                if (summary[sectionKey]) {
+                    const sectionSummary = summary[sectionKey];
+                    const config = sectionConfig[sectionKey];
+                    
+                    container.innerHTML += `
+                        <div class="mb-3">
+                            <div class="d-flex justify-content-between mb-1">
+                                <small class="fw-medium">${config.name}</small>
+                                <small>${sectionSummary.completion_rate}%</small>
+                            </div>
+                            <div class="progress">
+                                <div class="progress-bar bg-${config.color}" 
+                                     style="width: ${sectionSummary.completion_rate}%"></div>
+                            </div>
+                            <small class="text-muted">
+                                ${sectionSummary.populated_fields}/${sectionSummary.total_fields} fields
+                            </small>
+                        </div>
+                    `;
+                }
+            });
+        }
+
+        function displayMetadata(data) {
+            const container = document.getElementById('metadataContent');
+            const fileInfo = data.file_info || {};
+            
+            let html = `
+                <div class="mb-2">
+                    <strong>Timestamp:</strong><br>
+                    <small>${new Date(data.timestamp || Date.now()).toLocaleString()}</small>
+                </div>
+            `;
+            
+            if (fileInfo.file_size) {
+                html += `
+                    <div class="mb-2">
+                        <strong>File Size:</strong><br>
+                        <small>${(fileInfo.file_size / 1024 / 1024).toFixed(2)} MB</small>
+                    </div>
+                `;
+            }
+            
+            if (fileInfo.page_count) {
+                html += `
+                    <div class="mb-2">
+                        <strong>Pages:</strong><br>
+                        <small>${fileInfo.page_count}</small>
+                    </div>
+                `;
+            }
+            
+            if (fileInfo.text_length) {
+                html += `
+                    <div class="mb-2">
+                        <strong>Text Length:</strong><br>
+                        <small>${fileInfo.text_length.toLocaleString()} characters</small>
+                    </div>
+                `;
+            }
+            
+            container.innerHTML = html;
+        }
+
+        function prepareJsonData(data) {
+            const jsonData = document.getElementById('jsonData');
+            jsonData.textContent = JSON.stringify(data.data, null, 2);
+            Prism.highlightElement(jsonData);
+        }
+
+        function toggleJsonView() {
+            const container = document.getElementById('jsonContainer');
+            const toggleText = document.getElementById('jsonToggleText');
+            
+            if (container.style.display === 'none') {
+                container.style.display = 'block';
+                toggleText.textContent = 'Hide';
+            } else {
+                container.style.display = 'none';
+                toggleText.textContent = 'Show';
+            }
+        }
+
+        function downloadJSON() {
+            if (!extractionData) return;
+            
+            const dataStr = JSON.stringify(extractionData.data, null, 2);
+            const dataBlob = new Blob([dataStr], { type: 'application/json' });
+            
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(dataBlob);
+            link.download = `lease_extraction_${taskId}_${Date.now()}.json`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        function copyToClipboard() {
+            if (!extractionData) return;
+            
+            const dataStr = JSON.stringify(extractionData.data, null, 2);
+            navigator.clipboard.writeText(dataStr).then(() => {
+                // Show temporary success message
+                const btn = event.target.closest('button');
+                const originalText = btn.innerHTML;
+                btn.innerHTML = '<i class="fas fa-check me-1"></i>Copied!';
+                btn.classList.add('btn-success');
+                btn.classList.remove('btn-light');
+                
+                setTimeout(() => {
+                    btn.innerHTML = originalText;
+                    btn.classList.remove('btn-success');
+                    btn.classList.add('btn-light');
+                }, 2000);
+            }).catch(err => {
+                alert('Failed to copy to clipboard');
+            });
+        }
+    </script>
+</body>
+</html>
