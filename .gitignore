@@ -143,7 +143,6 @@ uploads/
 *.pdf
 *.docx
 *.doc
-*.txt
 results/
 logs/
 temp/
