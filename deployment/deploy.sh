@@ -29,7 +29,7 @@ fi
 
 # Create application directory
 echo -e "${YELLOW}📁 Setting up application directory...${NC}"
-APP_DIR="/opt/lease-extraction"
+APP_DIR="/home/ubuntu/agreement-data-extraction"
 mkdir -p $APP_DIR
 chown leaseapp:leaseapp $APP_DIR
 
