@@ -85,12 +85,13 @@ class DocumentProcessor:
             }
     
     def _extract_from_pdf(self, file_path: Path) -> Dict[str, Any]:
-        """Extract text from PDF file."""
+        """Extract text from PDF file with page-wise information."""
         if PyPDF2 is None:
             raise ImportError("PyPDF2 is required for PDF processing")
         
         text = ""
         page_count = 0
+        pages_data = []  # Store page-wise information
         
         try:
             with open(file_path, 'rb') as file:
@@ -101,10 +102,28 @@ class DocumentProcessor:
                     try:
                         page_text = page.extract_text()
                         if page_text:
-                            text += f"\n--- Page {page_num + 1} ---\n"
-                            text += page_text
+                            # Clean and format page text
+                            cleaned_text = page_text.strip()
+                            
+                            # Store page information
+                            pages_data.append({
+                                'page_number': page_num + 1,
+                                'text': cleaned_text,
+                                'text_length': len(cleaned_text)
+                            })
+                            
+                            # Add to combined text with clear page markers
+                            text += f"\n\n=== PAGE {page_num + 1} ===\n"
+                            text += cleaned_text
+                            text += f"\n=== END PAGE {page_num + 1} ===\n"
+                            
                     except Exception as e:
                         logger.warning(f"Error extracting text from page {page_num + 1}: {str(e)}")
+                        pages_data.append({
+                            'page_number': page_num + 1,
+                            'text': '',
+                            'error': str(e)
+                        })
                         continue
                         
         except Exception as e:
@@ -113,26 +132,43 @@ class DocumentProcessor:
         return {
             'text': text.strip(),
             'page_count': page_count,
-            'extraction_method': 'PyPDF2'
+            'pages_data': pages_data,
+            'extraction_method': 'PyPDF2',
+            'supports_citations': True
         }
     
     def _extract_from_docx(self, file_path: Path) -> Dict[str, Any]:
-        """Extract text from DOCX file."""
+        """Extract text from DOCX file with section information."""
         if Document is None:
             raise ImportError("python-docx is required for DOCX processing")
         
         try:
             doc = Document(file_path)
             
-            # Extract paragraphs
+            # Extract paragraphs with section context
             paragraphs = []
-            for para in doc.paragraphs:
-                if para.text.strip():
-                    paragraphs.append(para.text.strip())
+            sections_data = []
+            current_section = 1
             
-            # Extract tables
+            for i, para in enumerate(doc.paragraphs):
+                if para.text.strip():
+                    paragraph_text = para.text.strip()
+                    paragraphs.append(paragraph_text)
+                    
+                    # Create section markers every 10 paragraphs or for headers
+                    if (i > 0 and i % 10 == 0) or (para.style and 'heading' in para.style.name.lower()):
+                        current_section += 1
+                    
+                    sections_data.append({
+                        'section': current_section,
+                        'paragraph': i + 1,
+                        'text': paragraph_text,
+                        'style': para.style.name if para.style else 'Normal'
+                    })
+            
+            # Extract tables with section context
             table_data = []
-            for table in doc.tables:
+            for table_num, table in enumerate(doc.tables):
                 table_text = []
                 for row in table.rows:
                     row_text = []
@@ -140,19 +176,32 @@ class DocumentProcessor:
                         row_text.append(cell.text.strip())
                     table_text.append(" | ".join(row_text))
                 if table_text:
-                    table_data.append("\n".join(table_text))
+                    table_content = "\n".join(table_text)
+                    table_data.append(table_content)
+                    sections_data.append({
+                        'section': f'Table {table_num + 1}',
+                        'text': table_content,
+                        'type': 'table'
+                    })
             
-            # Combine all text
-            text = "\n".join(paragraphs)
+            # Combine all text with section markers
+            text = ""
+            for i, para in enumerate(paragraphs):
+                if i > 0 and i % 10 == 0:
+                    text += f"\n\n=== SECTION {(i // 10) + 1} ===\n"
+                text += para + "\n"
+            
             if table_data:
-                text += "\n\n--- Tables ---\n"
+                text += "\n\n=== TABLES SECTION ===\n"
                 text += "\n\n".join(table_data)
             
             return {
-                'text': text,
+                'text': text.strip(),
                 'paragraph_count': len(paragraphs),
                 'table_count': len(table_data),
-                'extraction_method': 'python-docx'
+                'sections_data': sections_data,
+                'extraction_method': 'python-docx',
+                'supports_citations': True  # We can provide section/paragraph references
             }
             
         except Exception as e:
@@ -169,10 +218,22 @@ class DocumentProcessor:
                     with open(file_path, 'r', encoding=encoding) as file:
                         text = file.read()
                     
+                    # Add simple line-based citations for text files
+                    lines = text.split('\n')
+                    lines_data = []
+                    for i, line in enumerate(lines):
+                        if line.strip():
+                            lines_data.append({
+                                'line_number': i + 1,
+                                'text': line.strip()
+                            })
+                    
                     return {
                         'text': text,
                         'encoding': encoding,
-                        'extraction_method': 'plain_text'
+                        'extraction_method': 'plain_text',
+                        'lines_data': lines_data,
+                        'supports_citations': True  # Line-based citations
                     }
                 except UnicodeDecodeError:
                     continue

@@ -1,0 +1,188 @@
+{
+  "agreement_details": {
+    "serviced_office": null,
+    "document_number": null,
+    "project_name": "Business Tower Complex",
+    "location": {
+      "survey_block_plot_no": null,
+      "district_sector": null,
+      "village": null,
+      "zone_khewat": null,
+      "mandal_municipality_khata": null,
+      "registrar_office_id": null
+    },
+    "agreement_type": "LEASE AGREEMENT",
+    "agreement_date": "2024-01-15"
+  },
+  "parties": {
+    "landlord": {
+      "name": "ABC Properties Ltd.",
+      "representative_name": "John Smith",
+      "representative_role": "Property Manager"
+    },
+    "tenant": {
+      "name": "XYZ Corporation",
+      "representative_name": "Jane Doe",
+      "representative_role": "Operations Director"
+    }
+  },
+  "unit_details": {
+    "unit_number": "503",
+    "floor_number": "5th Floor",
+    "wing": null,
+    "other_info": null,
+    "abstract_area_type": null,
+    "abstract_area": null,
+    "abstract_rate": null,
+    "chargeable_area_type": null,
+    "super_built_up_area": null,
+    "built_up_area": null,
+    "carpet_area": null
+  },
+  "lease_terms": {
+    "lease_start_date": "2024-02-01",
+    "lease_expiry_date": "2025-01-31",
+    "license_duration_months": 12,
+    "monthly_rent": 3500,
+    "rate_per_sqft": null,
+    "consideration_value": null,
+    "escalation": {
+      "period_months": null,
+      "percentage": null
+    },
+    "unit_condition": null,
+    "fit_outs": null,
+    "furnished_rate": null,
+    "rent_free_period_months": null,
+    "lock_in_period_landlord_months": null,
+    "lock_in_period_tenant_months": null
+  },
+  "financials": {
+    "security_deposit": 10500,
+    "monthly_rental_equivalent_of_deposit": 3,
+    "market_value": null,
+    "stamp_duty_amount": null,
+    "registration_amount": null
+  },
+  "parking_cam": {
+    "car_parking_slots": null,
+    "car_parking_type": null,
+    "additional_car_parking_charges": null,
+    "two_wheeler_parking_slots": null,
+    "additional_two_wheeler_parking_charges": null,
+    "monthly_cam_charges": null,
+    "cam_paid_by": null
+  },
+  "property_tax": {
+    "total_property_tax": null,
+    "property_tax": null,
+    "paid_by": null
+  },
+  "miscellaneous": {
+    "comments": null,
+    "approver_comments": null,
+    "floor_plan": null,
+    "abstract": null,
+    "agreement_file": null,
+    "other_documents": []
+  },
+  "citations": {
+    "Note": "For each field extracted, provide the page number or section where the information was found. Use format like 'Page 1', 'Page 2-3', 'Section 1', 'Table 1', etc.",
+    "agreement_details": {
+      "serviced_office": null,
+      "document_number": null,
+      "project_name": "Page 1",
+      "location": {
+        "survey_block_plot_no": null,
+        "district_sector": null,
+        "village": null,
+        "zone_khewat": null,
+        "mandal_municipality_khata": null,
+        "registrar_office_id": null
+      },
+      "agreement_type": "Page 1",
+      "agreement_date": "Page 1"
+    },
+    "parties": {
+      "landlord": {
+        "name": "Page 1",
+        "representative_name": "Page 1",
+        "representative_role": "Page 1"
+      },
+      "tenant": {
+        "name": "Page 1",
+        "representative_name": "Page 1",
+        "representative_role": "Page 1"
+      }
+    },
+    "unit_details": {
+      "unit_number": "Page 1",
+      "floor_number": "Page 1",
+      "wing": null,
+      "other_info": null,
+      "abstract_area_type": null,
+      "abstract_area": null,
+      "abstract_rate": null,
+      "chargeable_area_type": null,
+      "super_built_up_area": null,
+      "built_up_area": null,
+      "carpet_area": null
+    },
+    "lease_terms": {
+      "lease_start_date": "Page 2",
+      "lease_expiry_date": "Page 2",
+      "license_duration_months": "Page 2",
+      "monthly_rent": "Page 2",
+      "rate_per_sqft": null,
+      "consideration_value": null,
+      "escalation": {
+        "period_months": null,
+        "percentage": null
+      },
+      "unit_condition": null,
+      "fit_outs": null,
+      "furnished_rate": null,
+      "rent_free_period_months": null,
+      "lock_in_period_landlord_months": null,
+      "lock_in_period_tenant_months": null
+    },
+    "financials": {
+      "security_deposit": "Page 2",
+      "monthly_rental_equivalent_of_deposit": "Page 2",
+      "market_value": null,
+      "stamp_duty_amount": null,
+      "registration_amount": null
+    },
+    "parking_cam": {
+      "car_parking_slots": null,
+      "car_parking_type": null,
+      "additional_car_parking_charges": null,
+      "two_wheeler_parking_slots": null,
+      "additional_two_wheeler_parking_charges": null,
+      "monthly_cam_charges": null,
+      "cam_paid_by": null
+    },
+    "property_tax": {
+      "total_property_tax": null,
+      "property_tax": null,
+      "paid_by": null
+    },
+    "miscellaneous": {
+      "comments": null,
+      "approver_comments": null,
+      "floor_plan": null,
+      "abstract": null,
+      "agreement_file": null,
+      "other_documents": null
+    }
+  },
+  "extraction_status": "success",
+  "provider": "gemini",
+  "token_usage": {
+    "provider": "gemini",
+    "prompt_tokens": 1644,
+    "completion_tokens": 1686,
+    "total_tokens": 4407,
+    "model": "gemini-2.5-pro"
+  }
+}

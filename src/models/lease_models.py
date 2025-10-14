@@ -122,6 +122,18 @@ class Miscellaneous(BaseModel):
     other_documents: Optional[List[str]] = None
 
 
+class Citations(BaseModel):
+    """Citation information for extracted fields."""
+    agreement_details: Optional[dict] = None
+    parties: Optional[dict] = None
+    unit_details: Optional[dict] = None
+    lease_terms: Optional[dict] = None
+    financials: Optional[dict] = None
+    parking_cam: Optional[dict] = None
+    property_tax: Optional[dict] = None
+    miscellaneous: Optional[dict] = None
+
+
 class LeaseAgreementData(BaseModel):
     """Complete lease agreement data structure."""
     agreement_details: Optional[AgreementDetails] = None
@@ -132,11 +144,14 @@ class LeaseAgreementData(BaseModel):
     parking_cam: Optional[ParkingCAM] = None
     property_tax: Optional[PropertyTax] = None
     miscellaneous: Optional[Miscellaneous] = None
+    citations: Optional[Citations] = None
     
     # Metadata fields
     extraction_status: Optional[str] = None
     provider: Optional[str] = None
     error: Optional[str] = None
+    token_usage: Optional[dict] = None
+    extracted_text: Optional[str] = None  # Store original extracted text for viewer
     
     class Config:
         """Pydantic configuration."""

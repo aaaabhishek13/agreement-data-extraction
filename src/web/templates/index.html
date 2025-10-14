@@ -90,6 +90,19 @@
                                 <div class="form-text">Choose the language model provider for data extraction</div>
                             </div>
 
+                            <!-- Processing Method Selection -->
+                            <div class="mb-3">
+                                <label class="form-label">Processing Method</label>
+                                <select class="form-select" name="processing_method" id="processingMethod">
+                                    <option value="text_extraction" selected>Extract Text Locally First</option>
+                                    <option value="direct_upload">Send File Directly to LLM</option>
+                                </select>
+                                <div class="form-text" id="processingMethodHelp">
+                                    <span id="textExtractionHelp">Extract text locally using PyPDF2/python-docx, then send to LLM (compatible with all providers)</span>
+                                    <span id="directUploadHelp" style="display: none;">Send file directly to LLM for processing (Gemini only, may be more accurate for complex layouts)</span>
+                                </div>
+                            </div>
+
                             <!-- File Upload Area -->
                             <div class="drag-drop-area" id="dragDropArea">
                                 <i class="fas fa-cloud-upload-alt fa-3x text-primary mb-3"></i>
@@ -254,6 +267,40 @@
             progressContainer.style.display = 'none';
         }
 
+        // Handle processing method changes
+        document.getElementById('processingMethod').addEventListener('change', function() {
+            const method = this.value;
+            const textHelp = document.getElementById('textExtractionHelp');
+            const directHelp = document.getElementById('directUploadHelp');
+            const llmProvider = document.getElementById('llmProvider');
+            
+            if (method === 'direct_upload') {
+                textHelp.style.display = 'none';
+                directHelp.style.display = 'inline';
+                // If direct upload is selected and provider is OpenAI, switch to Gemini
+                if (llmProvider.value === 'openai') {
+                    llmProvider.value = 'gemini';
+                    alert('Direct file upload is only supported by Gemini. Switched to Gemini provider.');
+                }
+            } else {
+                textHelp.style.display = 'inline';
+                directHelp.style.display = 'none';
+            }
+        });
+
+        // Handle LLM provider changes
+        document.getElementById('llmProvider').addEventListener('change', function() {
+            const provider = this.value;
+            const processingMethod = document.getElementById('processingMethod');
+            
+            if (provider === 'openai' && processingMethod.value === 'direct_upload') {
+                processingMethod.value = 'text_extraction';
+                document.getElementById('textExtractionHelp').style.display = 'inline';
+                document.getElementById('directUploadHelp').style.display = 'none';
+                alert('OpenAI does not support direct file upload. Switched to text extraction method.');
+            }
+        });
+
         // Form submission
         uploadForm.addEventListener('submit', function(e) {
             e.preventDefault();
@@ -266,6 +313,10 @@
             const formData = new FormData();
             formData.append('file', selectedFile);
             formData.append('llm_provider', document.getElementById('llmProvider').value);
+            
+            // Add processing method
+            const processingMethod = document.getElementById('processingMethod').value;
+            formData.append('direct_upload', processingMethod === 'direct_upload' ? 'true' : 'false');
 
             // Show progress
             progressContainer.style.display = 'block';

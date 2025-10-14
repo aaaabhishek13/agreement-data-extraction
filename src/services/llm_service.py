@@ -139,6 +139,11 @@ class LLMService:
                 if extracted_data.get('extraction_status') != 'parsing_failed':
                     if attempt > 0:
                         extracted_data['retry_attempts'] = attempt + 1
+                    
+                    # Add token usage information if available
+                    if hasattr(self, '_last_token_usage'):
+                        extracted_data['token_usage'] = self._last_token_usage.copy()
+                    
                     logger.info(f"Successfully extracted lease data using LLM (attempt {attempt + 1})")
                     return extracted_data
                 
@@ -169,8 +174,211 @@ class LLMService:
             'total_attempts': max_retries + 1
         }
     
+    def extract_from_file(self, file_path: str, max_retries: int = 2) -> Dict[str, Any]:
+        """
+        Extract lease data by sending file directly to LLM (Gemini only for now).
+        
+        Args:
+            file_path: Path to the document file
+            max_retries: Maximum number of retry attempts
+            
+        Returns:
+            Dict containing extracted data or error information
+        """
+        try:
+            if self.provider != LLMProvider.GEMINI:
+                raise ValueError(f"Direct file upload not supported for {self.provider.value}. Only Gemini supports file uploads currently.")
+            
+            import mimetypes
+            from pathlib import Path
+            
+            file_path = Path(file_path)
+            if not file_path.exists():
+                return {
+                    'error': f'File not found: {file_path}',
+                    'extraction_status': 'failed',
+                    'provider': self.provider.value
+                }
+            
+            # Get MIME type
+            mime_type, _ = mimetypes.guess_type(str(file_path))
+            if not mime_type:
+                # Default MIME types for common document formats
+                ext = file_path.suffix.lower()
+                mime_map = {
+                    '.pdf': 'application/pdf',
+                    '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                    '.doc': 'application/msword',
+                    '.txt': 'text/plain'
+                }
+                mime_type = mime_map.get(ext, 'application/octet-stream')
+            
+            # Validate file format for Gemini
+            supported_formats = ['.pdf', '.docx', '.doc', '.txt']
+            if file_path.suffix.lower() not in supported_formats:
+                raise ValueError(f"Unsupported file format {file_path.suffix}. Supported formats: {supported_formats}")
+            
+            # Check file size (Gemini has limits)
+            file_size = file_path.stat().st_size
+            max_size = 20 * 1024 * 1024  # 20MB limit for Gemini
+            if file_size > max_size:
+                raise ValueError(f"File too large ({file_size / 1024 / 1024:.1f}MB). Maximum size: {max_size / 1024 / 1024}MB")
+            
+            logger.info(f"=== DIRECT FILE UPLOAD TO GEMINI ===")
+            logger.info(f"File: {file_path.name}")
+            logger.info(f"Size: {file_size} bytes ({file_size / 1024 / 1024:.2f} MB)")
+            logger.info(f"MIME type: {mime_type}")
+            
+            try:
+                # For DOCX files, try with explicit MIME type first
+                if file_path.suffix.lower() == '.docx':
+                    logger.info("Attempting DOCX upload with explicit MIME type")
+                    try:
+                        uploaded_file = genai.upload_file(
+                            path=str(file_path), 
+                            mime_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+                        )
+                        logger.info(f"DOCX upload successful. URI: {uploaded_file.uri}")
+                    except Exception as docx_error:
+                        logger.warning(f"DOCX upload failed with explicit MIME type: {str(docx_error)}")
+                        # Try with generic application type
+                        try:
+                            uploaded_file = genai.upload_file(path=str(file_path), mime_type='application/octet-stream')
+                            logger.info(f"DOCX upload successful with generic MIME type. URI: {uploaded_file.uri}")
+                        except Exception as generic_error:
+                            logger.error(f"DOCX upload failed with both MIME types: {str(generic_error)}")
+                            raise ValueError(f"DOCX file upload not supported by Gemini API: {str(generic_error)}")
+                else:
+                    # For other file types, use detected MIME type
+                    uploaded_file = genai.upload_file(path=str(file_path), mime_type=mime_type)
+                    logger.info(f"Uploaded file URI: {uploaded_file.uri}")
+            except Exception as upload_error:
+                raise ValueError(f"Failed to upload file to Gemini: {str(upload_error)}")
+            
+            # Create prompt for file-based extraction
+            prompt = self._create_file_extraction_prompt()
+            
+            last_error = None
+            for attempt in range(max_retries + 1):
+                try:
+                    logger.info(f"=== GEMINI FILE EXTRACTION (Attempt {attempt + 1}) ===")
+                    
+                    # Call Gemini with uploaded file
+                    response = self._call_gemini_with_file(prompt, uploaded_file)
+                    
+                    # Log the raw response received
+                    logger.info(f"=== RAW RESPONSE FROM GEMINI FILE (Attempt {attempt + 1}) ===")
+                    logger.info(f"Response length: {len(response)} characters")
+                    
+                    # Check if full content logging is enabled
+                    log_full_content = os.getenv('LOG_FULL_CONTENT', 'false').lower() == 'true'
+                    
+                    if log_full_content:
+                        logger.info("=== COMPLETE RAW RESPONSE ===")
+                        logger.info(response)
+                        logger.info("=== END COMPLETE RAW RESPONSE ===")
+                    else:
+                        # Log first and last parts of the response for debugging
+                        response_preview = response[:500] + "...[TRUNCATED]..." + response[-200:] if len(response) > 700 else response
+                        logger.info(f"Raw response: {response_preview}")
+                    
+                    # Parse the JSON response
+                    extracted_data = self._parse_response(response)
+                    
+                    # If parsing was successful, return the data
+                    if extracted_data.get('extraction_status') != 'parsing_failed':
+                        if attempt > 0:
+                            extracted_data['retry_attempts'] = attempt + 1
+                        extracted_data['extraction_method'] = 'direct_file_upload'
+                        
+                        # Add token usage information if available
+                        if hasattr(self, '_last_token_usage'):
+                            extracted_data['token_usage'] = self._last_token_usage.copy()
+                        
+                        logger.info(f"Successfully extracted lease data from file (attempt {attempt + 1})")
+                        
+                        # Clean up uploaded file
+                        try:
+                            genai.delete_file(uploaded_file.name)
+                            logger.info("Cleaned up uploaded file")
+                        except Exception as cleanup_error:
+                            logger.warning(f"Failed to cleanup uploaded file: {cleanup_error}")
+                        
+                        return extracted_data
+                    
+                    # If parsing failed, save the error and retry
+                    last_error = extracted_data.get('error', 'JSON parsing failed')
+                    logger.warning(f"Attempt {attempt + 1} failed with parsing error: {last_error}")
+                    
+                    if attempt < max_retries:
+                        logger.info(f"Retrying file extraction (attempt {attempt + 2}/{max_retries + 1})...")
+                        continue
+                    else:
+                        # Clean up uploaded file
+                        try:
+                            genai.delete_file(uploaded_file.name)
+                        except Exception:
+                            pass
+                        return extracted_data
+                        
+                except Exception as e:
+                    last_error = str(e)
+                    logger.error(f"File extraction attempt {attempt + 1} failed with error: {last_error}")
+                    
+                    if attempt < max_retries:
+                        logger.info(f"Retrying file extraction (attempt {attempt + 2}/{max_retries + 1})...")
+                        continue
+            
+            # Clean up uploaded file
+            try:
+                genai.delete_file(uploaded_file.name)
+            except Exception:
+                pass
+            
+            # If all attempts failed, return the last error with special handling for DOCX
+            if file_path.suffix.lower() == '.docx' and last_error and ('invalid argument' in str(last_error).lower() or '400' in str(last_error)):
+                return {
+                    'error': f'DOCX direct upload failed after {max_retries + 1} attempts. This file format may not be fully supported by Gemini file API. Please try text extraction method instead. Last error: {last_error}',
+                    'extraction_status': 'failed',
+                    'provider': self.provider.value,
+                    'total_attempts': max_retries + 1,
+                    'extraction_method': 'direct_file_upload',
+                    'suggested_method': 'text_extraction'
+                }
+            
+            return {
+                'error': f'All {max_retries + 1} file extraction attempts failed. Last error: {last_error}',
+                'extraction_status': 'failed',
+                'provider': self.provider.value,
+                'total_attempts': max_retries + 1,
+                'extraction_method': 'direct_file_upload'
+            }
+            
+        except Exception as e:
+            error_msg = str(e)
+            logger.error(f"File upload extraction failed: {error_msg}")
+            
+            # Special handling for DOCX files with upload issues
+            if file_path.suffix.lower() == '.docx' and ('invalid argument' in error_msg.lower() or '400' in error_msg):
+                logger.info("DOCX direct upload failed - this file format may have compatibility issues with Gemini file API")
+                return {
+                    'error': f'DOCX direct upload not supported by Gemini API. Please use text extraction method instead. Original error: {error_msg}',
+                    'extraction_status': 'failed',
+                    'provider': self.provider.value,
+                    'extraction_method': 'direct_file_upload',
+                    'suggested_method': 'text_extraction',
+                    'note': 'DOCX files may work better with text extraction method'
+                }
+            
+            return {
+                'error': f'File upload extraction failed: {error_msg}',
+                'extraction_status': 'failed',
+                'provider': self.provider.value,
+                'extraction_method': 'direct_file_upload'
+            }
+    
     def _create_extraction_prompt(self, document_text: str) -> str:
-        """Create a detailed prompt for lease data extraction."""
+        """Create a detailed prompt for lease data extraction with citation support."""
         
         schema = {
             "agreement_details": {
@@ -259,11 +467,51 @@ class LLMService:
                 "abstract": "string",
                 "agreement_file": "string",
                 "other_documents": "array of strings"
+            },
+            "citations": {
+                "Note": "For each field extracted, provide the page number or section where the information was found. Use format like 'Page 1', 'Page 2-3', 'Section 1', 'Table 1', etc.",
+                "agreement_details": "object with page/section references for each field",
+                "parties": "object with page/section references for each field", 
+                "unit_details": "object with page/section references for each field",
+                "lease_terms": "object with page/section references for each field",
+                "financials": "object with page/section references for each field",
+                "parking_cam": "object with page/section references for each field",
+                "property_tax": "object with page/section references for each field",
+                "miscellaneous": "object with page/section references for each field"
             }
         }
         
+        # Check if the document has page markers
+        has_page_markers = "=== PAGE" in document_text or "--- Page" in document_text
+        has_section_markers = "=== SECTION" in document_text or "=== TABLES SECTION" in document_text
+        
+        citation_instruction = ""
+        if has_page_markers:
+            citation_instruction = """
+**CITATION REQUIREMENTS:**
+- The document contains page markers (=== PAGE X ===). 
+- For each extracted field, note which page the information came from
+- Use format: "Page 1", "Page 2", "Page 1-2" for multi-page info
+- If information spans multiple pages, list all relevant pages
+"""
+        elif has_section_markers:
+            citation_instruction = """
+**CITATION REQUIREMENTS:**
+- The document contains section markers (=== SECTION X ===).
+- For each extracted field, note which section the information came from
+- Use format: "Section 1", "Section 2", "Table 1", etc.
+- For tables, use "Tables Section"
+"""
+        else:
+            citation_instruction = """
+**CITATION REQUIREMENTS:**
+- Provide line-based or paragraph-based references where possible
+- Use format: "Lines 1-5", "Paragraph 2", "Beginning", "Middle", "End"
+- Be as specific as possible about location in document
+"""
+
         prompt = f"""
-You are an expert document analyzer specializing in lease agreements. Your task is to extract structured data from the provided lease agreement text.
+You are an expert document analyzer specializing in lease agreements. Your task is to extract structured data from the provided lease agreement text WITH SOURCE CITATIONS.
 
 **CRITICAL INSTRUCTIONS:**
 1. Carefully analyze the lease agreement document text provided below
@@ -276,14 +524,33 @@ You are an expert document analyzer specializing in lease agreements. Your task 
 8. Do NOT wrap your response in ```json blocks or any other formatting
 9. Ensure all strings are properly quoted and all commas are correctly placed
 10. Double-check that your JSON is syntactically correct before responding
+11. **IMPORTANT: Include citations for each extracted field showing where in the document you found the information**
+
+{citation_instruction}
 
 **JSON SCHEMA:**
 {json.dumps(schema, indent=2)}
 
+**EXAMPLE CITATION FORMAT:**
+```json
+{{
+  "agreement_details": {{
+    "project_name": "Example Tower",
+    "agreement_date": "2024-01-15"
+  }},
+  "citations": {{
+    "agreement_details": {{
+      "project_name": "Page 1",
+      "agreement_date": "Page 1"
+    }}
+  }}
+}}
+```
+
 **LEASE AGREEMENT DOCUMENT TEXT:**
 {document_text}
 
-**RESPONSE FORMAT:** Return only a valid JSON object that matches the schema above.
+**RESPONSE FORMAT:** Return only a valid JSON object that matches the schema above, including the citations section.
 """
         
         return prompt
@@ -307,6 +574,23 @@ You are an expert document analyzer specializing in lease agreements. Your task 
                 temperature=0.1,  # Low temperature for consistent output
                 response_format={"type": "json_object"}
             )
+            
+            # Log token usage
+            if hasattr(response, 'usage') and response.usage:
+                usage = response.usage
+                logger.info(f"=== OPENAI TOKEN USAGE ===")
+                logger.info(f"Prompt tokens: {usage.prompt_tokens}")
+                logger.info(f"Completion tokens: {usage.completion_tokens}")
+                logger.info(f"Total tokens: {usage.total_tokens}")
+                
+                # Store token usage for later retrieval
+                self._last_token_usage = {
+                    'provider': 'openai',
+                    'prompt_tokens': usage.prompt_tokens,
+                    'completion_tokens': usage.completion_tokens,
+                    'total_tokens': usage.total_tokens,
+                    'model': self.model
+                }
             
             return response.choices[0].message.content
             
@@ -347,6 +631,49 @@ You are an expert document analyzer specializing in lease agreements. Your task 
                 generation_config=generation_config,
                 safety_settings=safety_settings
             )
+            
+            # Log token usage if available
+            if hasattr(response, 'usage_metadata') and response.usage_metadata:
+                usage = response.usage_metadata
+                logger.info(f"=== GEMINI TOKEN USAGE ===")
+                logger.info(f"Prompt tokens: {getattr(usage, 'prompt_token_count', 'N/A')}")
+                logger.info(f"Completion tokens: {getattr(usage, 'candidates_token_count', 'N/A')}")
+                logger.info(f"Total tokens: {getattr(usage, 'total_token_count', 'N/A')}")
+                
+                # Store token usage for later retrieval
+                self._last_token_usage = {
+                    'provider': 'gemini',
+                    'prompt_tokens': getattr(usage, 'prompt_token_count', 0),
+                    'completion_tokens': getattr(usage, 'candidates_token_count', 0),
+                    'total_tokens': getattr(usage, 'total_token_count', 0),
+                    'model': self.model_name
+                }
+            else:
+                # For older versions or when usage data is not available
+                logger.info("=== GEMINI TOKEN USAGE ===")
+                logger.info("Token usage data not available (may require newer Gemini API version)")
+                
+                # Estimate tokens (rough approximation: 1 token ≈ 4 characters)
+                estimated_prompt_tokens = len(prompt) // 4
+                response_text = ""
+                if response.candidates and len(response.candidates) > 0:
+                    candidate = response.candidates[0]
+                    if hasattr(candidate, 'content') and candidate.content and candidate.content.parts:
+                        response_text = candidate.content.parts[0].text
+                estimated_completion_tokens = len(response_text) // 4
+                
+                logger.info(f"Estimated prompt tokens: {estimated_prompt_tokens}")
+                logger.info(f"Estimated completion tokens: {estimated_completion_tokens}")
+                logger.info(f"Estimated total tokens: {estimated_prompt_tokens + estimated_completion_tokens}")
+                
+                self._last_token_usage = {
+                    'provider': 'gemini',
+                    'prompt_tokens': estimated_prompt_tokens,
+                    'completion_tokens': estimated_completion_tokens,
+                    'total_tokens': estimated_prompt_tokens + estimated_completion_tokens,
+                    'model': self.model_name,
+                    'estimated': True
+                }
             
             # Check if response was blocked
             if response.candidates and len(response.candidates) > 0:
@@ -593,3 +920,245 @@ You are an expert document analyzer specializing in lease agreements. Your task 
                 'provider': self.provider.value,
                 'error': str(e)
             }
+    
+    def _create_file_extraction_prompt(self) -> str:
+        """Create a prompt for file-based lease data extraction with citations."""
+        
+        schema = {
+            "agreement_details": {
+                "serviced_office": "boolean",
+                "document_number": "string",
+                "project_name": "string",
+                "location": {
+                    "survey_block_plot_no": "string",
+                    "district_sector": "string",
+                    "village": "string",
+                    "zone_khewat": "string",
+                    "mandal_municipality_khata": "string",
+                    "registrar_office_id": "string"
+                },
+                "agreement_type": "string",
+                "agreement_date": "date (YYYY-MM-DD)"
+            },
+            "parties": {
+                "landlord": {
+                    "name": "string",
+                    "representative_name": "string",
+                    "representative_role": "string"
+                },
+                "tenant": {
+                    "name": "string",
+                    "representative_name": "string",
+                    "representative_role": "string"
+                }
+            },
+            "unit_details": {
+                "unit_number": "string",
+                "floor_number": "string",
+                "wing": "string",
+                "other_info": "string",
+                "abstract_area_type": "string",
+                "abstract_area": "number",
+                "abstract_rate": "number",
+                "chargeable_area_type": "string",
+                "super_built_up_area": "number",
+                "built_up_area": "number",
+                "carpet_area": "number"
+            },
+            "lease_terms": {
+                "lease_start_date": "date (YYYY-MM-DD)",
+                "lease_expiry_date": "date (YYYY-MM-DD)",
+                "license_duration_months": "number",
+                "monthly_rent": "number",
+                "rate_per_sqft": "number",
+                "consideration_value": "number",
+                "escalation": {
+                    "period_months": "number",
+                    "percentage": "number"
+                },
+                "unit_condition": "string",
+                "fit_outs": "boolean",
+                "furnished_rate": "number",
+                "rent_free_period_months": "number",
+                "lock_in_period_landlord_months": "number",
+                "lock_in_period_tenant_months": "number"
+            },
+            "financials": {
+                "security_deposit": "number",
+                "monthly_rental_equivalent_of_deposit": "number",
+                "market_value": "number",
+                "stamp_duty_amount": "number",
+                "registration_amount": "number"
+            },
+            "parking_cam": {
+                "car_parking_slots": "number",
+                "car_parking_type": "string",
+                "additional_car_parking_charges": "number",
+                "two_wheeler_parking_slots": "number",
+                "additional_two_wheeler_parking_charges": "number",
+                "monthly_cam_charges": "number",
+                "cam_paid_by": "string"
+            },
+            "property_tax": {
+                "total_property_tax": "number",
+                "property_tax": "number",
+                "paid_by": "string"
+            },
+            "miscellaneous": {
+                "comments": "string",
+                "approver_comments": "string",
+                "floor_plan": "string",
+                "abstract": "string",
+                "agreement_file": "string",
+                "other_documents": "array of strings"
+            },
+            "citations": {
+                "Note": "For each field extracted, provide the page number where the information was found. Use format like 'Page 1', 'Page 2-3', etc.",
+                "agreement_details": "object with page references for each field",
+                "parties": "object with page references for each field", 
+                "unit_details": "object with page references for each field",
+                "lease_terms": "object with page references for each field",
+                "financials": "object with page references for each field",
+                "parking_cam": "object with page references for each field",
+                "property_tax": "object with page references for each field",
+                "miscellaneous": "object with page references for each field"
+            }
+        }
+        
+        prompt = f"""
+You are an expert document analyzer specializing in lease agreements. Your task is to extract structured data from the provided lease agreement document WITH SOURCE CITATIONS.
+
+**CRITICAL INSTRUCTIONS:**
+1. Carefully analyze the lease agreement document provided as a file
+2. Extract all relevant information according to the specified JSON schema
+3. For missing information, use null values
+4. For dates, use YYYY-MM-DD format
+5. For numbers, extract only numeric values (remove currency symbols, commas, etc.)
+6. Be as accurate as possible and avoid making assumptions
+7. Return ONLY valid JSON without any additional text, explanations, or markdown formatting
+8. Do NOT wrap your response in ```json blocks or any other formatting
+9. Ensure all strings are properly quoted and all commas are correctly placed
+10. Double-check that your JSON is syntactically correct before responding
+11. **IMPORTANT: Include citations for each extracted field showing which page you found the information**
+
+**CITATION REQUIREMENTS:**
+- For each extracted field, note which page the information came from
+- Use format: "Page 1", "Page 2", "Page 1-2" for multi-page info
+- If information spans multiple pages, list all relevant pages
+- If page numbers are not visible, use "Page 1", "Page 2" etc. based on document structure
+
+**JSON SCHEMA:**
+{json.dumps(schema, indent=2)}
+
+**EXAMPLE CITATION FORMAT:**
+```json
+{{
+  "agreement_details": {{
+    "project_name": "Example Tower",
+    "agreement_date": "2024-01-15"
+  }},
+  "citations": {{
+    "agreement_details": {{
+      "project_name": "Page 1",
+      "agreement_date": "Page 1"
+    }}
+  }}
+}}
+```
+
+**RESPONSE FORMAT:** Return only a valid JSON object that matches the schema above, including the citations section.
+"""
+        
+        return prompt
+    
+    def _call_gemini_with_file(self, prompt: str, uploaded_file) -> str:
+        """Call Google Gemini API with uploaded file for text extraction."""
+        try:
+            # Configure generation parameters with safety settings
+            generation_config = genai.types.GenerationConfig(
+                temperature=0.1,
+                max_output_tokens=8000,
+            )
+            
+            # Configure safety settings to be more permissive for business documents
+            safety_settings = [
+                {
+                    "category": "HARM_CATEGORY_HARASSMENT",
+                    "threshold": "BLOCK_ONLY_HIGH"
+                },
+                {
+                    "category": "HARM_CATEGORY_HATE_SPEECH",
+                    "threshold": "BLOCK_ONLY_HIGH"
+                },
+                {
+                    "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+                    "threshold": "BLOCK_ONLY_HIGH"
+                },
+                {
+                    "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
+                    "threshold": "BLOCK_ONLY_HIGH"
+                }
+            ]
+            
+            response = self.client.generate_content(
+                [prompt, uploaded_file],
+                generation_config=generation_config,
+                safety_settings=safety_settings
+            )
+            
+            # Log token usage if available
+            if hasattr(response, 'usage_metadata') and response.usage_metadata:
+                usage = response.usage_metadata
+                logger.info(f"=== GEMINI FILE TOKEN USAGE ===")
+                logger.info(f"Prompt tokens: {getattr(usage, 'prompt_token_count', 'N/A')}")
+                logger.info(f"Completion tokens: {getattr(usage, 'candidates_token_count', 'N/A')}")
+                logger.info(f"Total tokens: {getattr(usage, 'total_token_count', 'N/A')}")
+                
+                # Store token usage for later retrieval
+                self._last_token_usage = {
+                    'provider': 'gemini',
+                    'prompt_tokens': getattr(usage, 'prompt_token_count', 0),
+                    'completion_tokens': getattr(usage, 'candidates_token_count', 0),
+                    'total_tokens': getattr(usage, 'total_token_count', 0),
+                    'model': self.model_name,
+                    'extraction_method': 'direct_file_upload'
+                }
+            else:
+                logger.info("=== GEMINI FILE TOKEN USAGE ===")
+                logger.info("Token usage data not available for file upload")
+                
+                # For file uploads, we can't easily estimate tokens
+                self._last_token_usage = {
+                    'provider': 'gemini',
+                    'prompt_tokens': 'N/A',
+                    'completion_tokens': 'N/A',
+                    'total_tokens': 'N/A',
+                    'model': self.model_name,
+                    'extraction_method': 'direct_file_upload',
+                    'note': 'Token usage not available for file uploads'
+                }
+            
+            # Check if response was blocked by safety filters
+            if response.prompt_feedback and hasattr(response.prompt_feedback, 'block_reason'):
+                block_reason = response.prompt_feedback.block_reason
+                if block_reason:
+                    raise Exception(f"Gemini blocked the request due to safety concerns: {block_reason}")
+            
+            # Check if response has valid content
+            if not response.candidates or len(response.candidates) == 0:
+                raise Exception("Gemini returned no response candidates")
+            
+            candidate = response.candidates[0]
+            
+            # Check for safety issues in the response
+            if hasattr(candidate, 'finish_reason') and candidate.finish_reason:
+                if 'SAFETY' in str(candidate.finish_reason):
+                    raise Exception(f"Gemini response blocked for safety: {candidate.finish_reason}")
+            
+            if not candidate.content or not candidate.content.parts:
+                raise Exception("Gemini returned empty content")
+            
+            return candidate.content.parts[0].text
+            
+        except Exception as e:
+            raise Exception(f"Gemini file API error: {str(e)}")

@@ -55,6 +55,94 @@
         .metadata-card {
             background-color: #f8f9fa;
         }
+        .citation {
+            font-size: 0.75rem;
+            color: #007bff;
+            font-style: italic;
+            cursor: pointer;
+            text-decoration: none;
+        }
+        .citation:hover {
+            color: #0056b3;
+            text-decoration: underline;
+        }
+        .citation i {
+            margin-right: 3px;
+        }
+        
+        /* Document Viewer Styles */
+        .document-viewer {
+            position: sticky;
+            top: 20px;
+            max-height: calc(100vh - 40px);
+            overflow: hidden;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            background: white;
+        }
+        
+        .document-viewer-header {
+            background: #f8f9fa;
+            border-bottom: 1px solid #dee2e6;
+            padding: 12px 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .document-viewer-content {
+            height: calc(100vh - 120px);
+            overflow: auto;
+        }
+        
+        .document-embed {
+            width: 100%;
+            height: 100%;
+            border: none;
+        }
+        
+        .document-not-supported {
+            padding: 40px 20px;
+            text-align: center;
+            color: #6c757d;
+        }
+        
+        .page-navigator {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .page-input {
+            width: 60px;
+            padding: 4px 8px;
+            border: 1px solid #ced4da;
+            border-radius: 4px;
+            text-align: center;
+        }
+        
+        .toggle-viewer-btn {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            z-index: 1000;
+            border-radius: 50px;
+            padding: 12px 20px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+        
+        .citation-highlight {
+            background-color: #fff3cd;
+            border: 1px solid #ffeaa7;
+            border-radius: 3px;
+            padding: 2px 4px;
+            animation: highlight-pulse 2s ease-in-out;
+        }
+        
+        @keyframes highlight-pulse {
+            0%, 100% { background-color: #fff3cd; }
+            50% { background-color: #ffd93d; }
+        }
     </style>
 </head>
 <body>
@@ -150,9 +238,9 @@
                 <div class="col-md-3 col-sm-6 mb-3">
                     <div class="card">
                         <div class="card-body text-center">
-                            <i class="fas fa-database fa-2x text-warning mb-2"></i>
-                            <h5 id="totalFields">0</h5>
-                            <small class="text-muted">Total Fields</small>
+                            <i class="fas fa-coins fa-2x text-warning mb-2"></i>
+                            <h5 id="tokenUsage">0</h5>
+                            <small class="text-muted">Tokens Used</small>
                         </div>
                     </div>
                 </div>
@@ -160,12 +248,37 @@
 
             <!-- Data Sections -->
             <div class="row">
-                <div class="col-lg-8">
+                <div class="col-lg-6">
                     <div id="dataSections">
                         <!-- Dynamic data sections will be inserted here -->
                     </div>
                 </div>
-                <div class="col-lg-4">
+                <div class="col-lg-6">
+                    <!-- Document Viewer -->
+                    <div class="document-viewer mb-4" id="documentViewer">
+                        <div class="document-viewer-header">
+                            <div>
+                                <i class="fas fa-file-alt me-2"></i>
+                                <strong>Document Viewer</strong>
+                                <small class="text-muted ms-2" id="documentName">Loading...</small>
+                            </div>
+                            <div class="page-navigator" id="pageNavigator" style="display: none;">
+                                <span class="small text-muted">Page:</span>
+                                <input type="number" class="page-input" id="pageInput" min="1" value="1">
+                                <span class="small text-muted">of <span id="totalPages">-</span></span>
+                                <button class="btn btn-sm btn-outline-secondary" onclick="goToPage()">
+                                    <i class="fas fa-search"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="document-viewer-content" id="documentContent">
+                            <div class="document-not-supported">
+                                <i class="fas fa-file-question fa-3x mb-3"></i>
+                                <p>Loading document viewer...</p>
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- Section Completion Summary -->
                     <div class="card metadata-card mb-4">
                         <div class="card-header">
@@ -211,6 +324,12 @@
                 </div>
             </div>
         </div>
+
+        <!-- Toggle Document Viewer Button (Mobile) -->
+        <button class="btn btn-primary toggle-viewer-btn d-lg-none" id="toggleViewerBtn" onclick="toggleDocumentViewer()" style="display: none;">
+            <i class="fas fa-file-alt me-2"></i>
+            <span id="toggleViewerText">Show Document</span>
+        </button>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
@@ -240,6 +359,13 @@
             } else {
                 showError('No task ID provided');
             }
+            
+            // Add event listener for Enter key in page input
+            document.addEventListener('keypress', function(e) {
+                if (e.target.id === 'pageInput' && e.key === 'Enter') {
+                    goToPage();
+                }
+            });
         });
 
         function loadResults() {
@@ -265,9 +391,19 @@
         }
 
         function showError(message) {
-            document.getElementById('loadingContainer').style.display = 'none';
-            document.getElementById('errorContainer').style.display = 'block';
-            document.getElementById('errorMessage').textContent = message;
+            const loadingContainer = document.getElementById('loadingContainer');
+            const errorContainer = document.getElementById('errorContainer');
+            const errorMessage = document.getElementById('errorMessage');
+            
+            if (loadingContainer) {
+                loadingContainer.style.display = 'none';
+            }
+            if (errorContainer) {
+                errorContainer.style.display = 'block';
+            }
+            if (errorMessage) {
+                errorMessage.textContent = message;
+            }
         }
 
         function displayResults(data) {
@@ -275,9 +411,36 @@
             document.getElementById('resultsContainer').style.display = 'block';
 
             // Update summary information
-            document.getElementById('fileName').textContent = `File: ${data.filename || 'Unknown'}`;
-            document.getElementById('processingTime').textContent = `${data.processing_time?.toFixed(2) || 0}s`;
-            document.getElementById('llmProvider').textContent = data.llm_provider || 'Unknown';
+            const fileNameElement = document.getElementById('fileName');
+            if (fileNameElement) {
+                fileNameElement.textContent = `File: ${data.filename || 'Unknown'}`;
+            }
+            
+            const processingTimeElement = document.getElementById('processingTime');
+            if (processingTimeElement) {
+                processingTimeElement.textContent = `${data.processing_time?.toFixed(2) || 0}s`;
+            }
+            
+            const llmProviderElement = document.getElementById('llmProvider');
+            if (llmProviderElement) {
+                llmProviderElement.textContent = data.llm_provider || 'Unknown';
+            }
+            
+            // Update token usage
+            const tokenUsageElement = document.getElementById('tokenUsage');
+            if (tokenUsageElement) {
+                if (data.data && data.data.token_usage) {
+                    const tokenUsage = data.data.token_usage;
+                    const totalTokens = tokenUsage.total_tokens;
+                    if (totalTokens && totalTokens !== 'N/A') {
+                        tokenUsageElement.textContent = totalTokens.toLocaleString();
+                    } else {
+                        tokenUsageElement.textContent = 'N/A';
+                    }
+                } else {
+                    tokenUsageElement.textContent = 'N/A';
+                }
+            }
 
             if (data.data) {
                 // Display extracted data
@@ -292,12 +455,17 @@
             // Display metadata
             displayMetadata(data);
 
+            // Setup document viewer
+            setupDocumentViewer(data);
+
             // Prepare JSON data
             prepareJsonData(data);
         }
 
         function displayExtractedData(data) {
             const container = document.getElementById('dataSections');
+            if (!container) return;
+            
             container.innerHTML = '';
 
             Object.keys(sectionConfig).forEach(sectionKey => {
@@ -311,7 +479,7 @@
 
         function createSectionCard(sectionKey, sectionData) {
             const config = sectionConfig[sectionKey];
-            const fieldsHtml = createFieldsHtml(sectionData);
+            const fieldsHtml = createFieldsHtml(sectionData, '', sectionKey);
             
             return `
                 <div class="card section-card">
@@ -327,7 +495,18 @@
             `;
         }
 
-        function createFieldsHtml(data, prefix = '') {
+        function getCitation(sectionKey, fieldKey) {
+            // Get citation information from the global data
+            if (extractionData && extractionData.data && extractionData.data.citations) {
+                const sectionCitations = extractionData.data.citations[sectionKey];
+                if (sectionCitations && sectionCitations[fieldKey]) {
+                    return sectionCitations[fieldKey];
+                }
+            }
+            return null;
+        }
+
+        function createFieldsHtml(data, prefix = '', sectionKey = '') {
             let html = '';
             
             Object.entries(data).forEach(([key, value]) => {
@@ -340,7 +519,7 @@
                         <div class="field-row">
                             <div class="field-label mb-2"><strong>${formattedKey}</strong></div>
                             <div class="ms-3">
-                                ${createFieldsHtml(value, displayKey)}
+                                ${createFieldsHtml(value, displayKey, sectionKey)}
                             </div>
                         </div>
                     `;
@@ -349,11 +528,15 @@
                     const displayValue = formatFieldValue(value);
                     const valueClass = value === null || value === '' ? 'empty-value' : 'field-value';
                     
+                    // Get citation for this field
+                    const citation = getCitation(sectionKey, key);
+                    const citationHtml = citation ? `<br><small class="citation" onclick="navigateToPage('${citation}')" title="Click to navigate to ${citation} in document" style="cursor: pointer;"><i class="fas fa-map-marker-alt"></i> ${citation} <i class="fas fa-external-link-alt" style="font-size: 0.8em; opacity: 0.7;"></i></small>` : '';
+                    
                     html += `
                         <div class="field-row">
                             <div class="row">
                                 <div class="col-sm-4 field-label">${formattedKey}</div>
-                                <div class="col-sm-8 ${valueClass}">${displayValue}</div>
+                                <div class="col-sm-8 ${valueClass}">${displayValue}${citationHtml}</div>
                             </div>
                         </div>
                     `;
@@ -390,12 +573,16 @@
         function displaySummaryStats(summary) {
             const overall = summary.overall;
             if (overall) {
-                document.getElementById('overallCompletion').textContent = `${overall.completion_rate}%`;
-                document.getElementById('totalFields').textContent = overall.total_fields;
+                const overallElement = document.getElementById('overallCompletion');
+                if (overallElement) {
+                    overallElement.textContent = `${overall.completion_rate}%`;
+                }
             }
 
             // Create section completion bars
             const container = document.getElementById('sectionSummary');
+            if (!container) return;
+            
             container.innerHTML = '';
 
             Object.keys(sectionConfig).forEach(sectionKey => {
@@ -424,6 +611,8 @@
 
         function displayMetadata(data) {
             const container = document.getElementById('metadataContent');
+            if (!container) return;
+            
             const fileInfo = data.file_info || {};
             
             let html = `
@@ -460,11 +649,51 @@
                 `;
             }
             
+            // Add processing method info
+            if (data.processing_method) {
+                html += `
+                    <div class="mb-2">
+                        <strong>Processing Method:</strong><br>
+                        <small>${data.processing_method === 'direct_upload' ? 'Direct File Upload' : 'Text Extraction'}</small>
+                    </div>
+                `;
+            }
+            
+            // Add token usage details
+            if (data.data && data.data.token_usage) {
+                const tokenUsage = data.data.token_usage;
+                html += `
+                    <div class="mb-3">
+                        <strong>Token Usage:</strong><br>
+                        <small>
+                            <div><strong>Provider:</strong> ${tokenUsage.provider || 'N/A'}</div>
+                            <div><strong>Model:</strong> ${tokenUsage.model || 'N/A'}</div>
+                            <div><strong>Prompt tokens:</strong> ${tokenUsage.prompt_tokens || 'N/A'}</div>
+                            <div><strong>Completion tokens:</strong> ${tokenUsage.completion_tokens || 'N/A'}</div>
+                            <div><strong>Total tokens:</strong> ${tokenUsage.total_tokens || 'N/A'}</div>
+                `;
+                
+                if (tokenUsage.estimated) {
+                    html += `<div class="text-warning"><em>* Estimated values</em></div>`;
+                }
+                
+                if (tokenUsage.note) {
+                    html += `<div class="text-info"><em>${tokenUsage.note}</em></div>`;
+                }
+                
+                html += `
+                        </small>
+                    </div>
+                `;
+            }
+            
             container.innerHTML = html;
         }
 
         function prepareJsonData(data) {
             const jsonData = document.getElementById('jsonData');
+            if (!jsonData) return;
+            
             jsonData.textContent = JSON.stringify(data.data, null, 2);
             Prism.highlightElement(jsonData);
         }
@@ -472,6 +701,8 @@
         function toggleJsonView() {
             const container = document.getElementById('jsonContainer');
             const toggleText = document.getElementById('jsonToggleText');
+            
+            if (!container || !toggleText) return;
             
             if (container.style.display === 'none') {
                 container.style.display = 'block';
@@ -494,6 +725,610 @@
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
+        }
+
+        // Document Viewer Functions
+        function setupDocumentViewer(data) {
+            const documentName = document.getElementById('documentName');
+            const documentContent = document.getElementById('documentContent');
+            const toggleViewerBtn = document.getElementById('toggleViewerBtn');
+            
+            if (documentName) {
+                documentName.textContent = data.filename || 'Unknown';
+            }
+            
+            // Show toggle button on mobile
+            if (toggleViewerBtn) {
+                toggleViewerBtn.style.display = 'block';
+            }
+            
+            // Load document based on file type
+            const filename = data.filename || '';
+            const fileExtension = filename.toLowerCase().split('.').pop();
+            
+            if (fileExtension === 'pdf') {
+                loadPdfViewer(data);
+            } else if (fileExtension === 'txt') {
+                loadTextViewer(data);
+            } else if (['docx', 'doc'].includes(fileExtension)) {
+                loadDocxViewer(data);
+            } else {
+                showUnsupportedDocument(fileExtension);
+            }
+        }
+        
+        function loadPdfViewer(data) {
+            const documentContent = document.getElementById('documentContent');
+            const pageNavigator = document.getElementById('pageNavigator');
+            
+            // Get page count estimate
+            const pageCount = estimatePageCount(data);
+            window.currentPdfPage = 1;
+            window.totalPdfPages = pageCount;
+            
+            // Create PDF viewer with controls
+            const pdfUrl = `/document/${taskId}`;
+            documentContent.innerHTML = `
+                <div style="height: 100%; display: flex; flex-direction: column;">
+                    <div style="background: #f8f9fa; padding: 8px 12px; border-bottom: 1px solid #dee2e6; display: flex; justify-content: space-between; align-items: center; flex-shrink: 0;">
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <button class="btn btn-sm btn-outline-secondary" onclick="navigateToSpecificPage(Math.max(1, window.currentPdfPage - 1))" id="prevPageBtn">
+                                <i class="fas fa-chevron-left"></i>
+                            </button>
+                            <span class="small">Page <strong id="currentPageDisplay">1</strong> of <strong>${pageCount}</strong></span>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="navigateToSpecificPage(Math.min(window.totalPdfPages, window.currentPdfPage + 1))" id="nextPageBtn">
+                                <i class="fas fa-chevron-right"></i>
+                            </button>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <button class="btn btn-sm btn-outline-primary" onclick="reloadPdfFrame()">
+                                <i class="fas fa-sync-alt"></i>
+                            </button>
+                            <button class="btn btn-sm btn-primary" onclick="openPdfInNewTab()">
+                                <i class="fas fa-external-link-alt"></i> Open Full
+                            </button>
+                        </div>
+                    </div>
+                    <div style="flex: 1; position: relative; min-height: 500px;">
+                        <iframe id="pdfFrame" 
+                                class="document-embed" 
+                                src="${pdfUrl}#page=1&zoom=100&toolbar=1" 
+                                style="width: 100%; height: 100%; border: none;"
+                                onload="onPdfFrameLoad()">
+                        </iframe>
+                        <div id="pdfFallback" style="display: none;" class="document-not-supported">
+                            <i class="fas fa-file-pdf fa-3x mb-3"></i>
+                            <p>PDF viewer not supported in this browser.</p>
+                            <div class="mt-3">
+                                <a href="${pdfUrl}" target="_blank" class="btn btn-primary me-2">
+                                    <i class="fas fa-external-link-alt me-2"></i>Open in New Tab
+                                </a>
+                                <button class="btn btn-outline-primary" onclick="downloadPdf()">
+                                    <i class="fas fa-download me-2"></i>Download PDF
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            // Show page navigator for PDFs
+            if (pageNavigator) {
+                pageNavigator.style.display = 'flex';
+                document.getElementById('totalPages').textContent = pageCount;
+                document.getElementById('pageInput').max = pageCount;
+                document.getElementById('pageInput').value = 1;
+            }
+            
+            // Set up iframe error handling
+            setTimeout(() => {
+                const iframe = document.getElementById('pdfFrame');
+                const fallback = document.getElementById('pdfFallback');
+                
+                try {
+                    // Check if iframe loaded successfully
+                    if (!iframe.contentDocument && !iframe.contentWindow) {
+                        throw new Error('PDF viewer not accessible');
+                    }
+                } catch (e) {
+                    console.log('PDF iframe not accessible, showing fallback');
+                    iframe.style.display = 'none';
+                    fallback.style.display = 'block';
+                }
+            }, 3000);
+        }
+        
+        function loadTextViewer(data) {
+            const documentContent = document.getElementById('documentContent');
+            const pageNavigator = document.getElementById('pageNavigator');
+            
+            // Hide page navigator for text files
+            if (pageNavigator) {
+                pageNavigator.style.display = 'none';
+            }
+            
+            // Load text content
+            const docUrl = `/document/${taskId}`;
+            fetch(docUrl)
+                .then(response => {
+                    if (response.ok) {
+                        return response.text();
+                    }
+                    throw new Error('Failed to load document');
+                })
+                .then(text => {
+                    // Display text with page markers highlighted
+                    const formattedText = highlightPageMarkers(text);
+                    documentContent.innerHTML = `
+                        <div style="padding: 20px; font-family: monospace; white-space: pre-wrap; line-height: 1.6;">
+                            ${formattedText}
+                        </div>
+                    `;
+                })
+                .catch(error => {
+                    documentContent.innerHTML = `
+                        <div class="document-not-supported">
+                            <i class="fas fa-exclamation-triangle fa-3x mb-3"></i>
+                            <p>Failed to load document: ${error.message}</p>
+                            <a href="/document/${taskId}" target="_blank" class="btn btn-primary">
+                                <i class="fas fa-external-link-alt me-2"></i>Open in New Tab
+                            </a>
+                        </div>
+                    `;
+                });
+        }
+        
+        function loadDocxViewer(data) {
+            const documentContent = document.getElementById('documentContent');
+            const pageNavigator = document.getElementById('pageNavigator');
+            
+            // Hide page navigator initially
+            if (pageNavigator) {
+                pageNavigator.style.display = 'none';
+            }
+            
+            // Show loading state
+            documentContent.innerHTML = `
+                <div style="padding: 40px; text-align: center;">
+                    <div class="spinner-border text-primary mb-3" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p>Loading DOCX document...</p>
+                </div>
+            `;
+            
+            // For DOCX files, we'll display the extracted text content that was used for processing
+            // since browsers cannot natively display DOCX files
+            if (data.data && data.data.extracted_text) {
+                // Use the extracted text that was processed by the LLM
+                displayExtractedDocxContent(data.data.extracted_text, pageNavigator);
+            } else {
+                // Fallback: try to load the document as text and show what we can
+                const docUrl = `/document/${taskId}`;
+                
+                documentContent.innerHTML = `
+                    <div class="document-not-supported">
+                        <i class="fas fa-file-word fa-3x mb-3 text-primary"></i>
+                        <h5>DOCX Document Viewer</h5>
+                        <p>This is a Microsoft Word document (.docx). Browsers cannot display DOCX files directly.</p>
+                        <div class="mt-4">
+                            <p class="mb-3"><strong>Available Options:</strong></p>
+                            <div class="d-grid gap-2">
+                                <a href="${docUrl}" target="_blank" class="btn btn-primary">
+                                    <i class="fas fa-external-link-alt me-2"></i>Open in New Tab
+                                </a>
+                                <button class="btn btn-outline-secondary" onclick="downloadDocument()">
+                                    <i class="fas fa-download me-2"></i>Download Document
+                                </button>
+                                <button class="btn btn-outline-info" onclick="showExtractedText()" id="showTextBtn">
+                                    <i class="fas fa-file-alt me-2"></i>View Extracted Text
+                                </button>
+                            </div>
+                        </div>
+                        <div class="mt-4">
+                            <small class="text-muted">
+                                To view the full document, download it and open with Microsoft Word or another compatible application.
+                            </small>
+                        </div>
+                    </div>
+                `;
+            }
+        }
+        
+        function displayExtractedDocxContent(extractedText, pageNavigator) {
+            const documentContent = document.getElementById('documentContent');
+            
+            // Format the extracted text for better display
+            const formattedText = formatDocxText(extractedText);
+            
+            documentContent.innerHTML = `
+                <div style="background: #f8f9fa; padding: 12px; border-bottom: 1px solid #dee2e6; display: flex; justify-content: space-between; align-items: center;">
+                    <div>
+                        <i class="fas fa-file-word text-primary me-2"></i>
+                        <strong>DOCX Content</strong>
+                        <small class="text-muted ms-2">(Extracted text used for processing)</small>
+                    </div>
+                    <div>
+                        <button class="btn btn-sm btn-outline-primary" onclick="downloadDocument()">
+                            <i class="fas fa-download"></i> Download Original
+                        </button>
+                    </div>
+                </div>
+                <div style="padding: 20px; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; max-height: calc(100vh - 200px); overflow-y: auto;">
+                    ${formattedText}
+                </div>
+            `;
+            
+            // Check if there are page markers and show navigator if found
+            if (extractedText.includes('=== PAGE')) {
+                const pageCount = (extractedText.match(/=== PAGE \d+ ===/g) || []).length;
+                if (pageCount > 1 && pageNavigator) {
+                    pageNavigator.style.display = 'flex';
+                    document.getElementById('totalPages').textContent = pageCount;
+                    document.getElementById('pageInput').max = pageCount;
+                    document.getElementById('pageInput').value = 1;
+                }
+            }
+        }
+        
+        function formatDocxText(text) {
+            if (!text) return '<p class="text-muted">No text content available.</p>';
+            
+            // Format the text for better readability
+            return text
+                // Highlight page markers
+                .replace(/=== PAGE (\d+) ===/g, '<div class="citation-highlight" id="page-$1" style="font-weight: bold; margin: 15px 0; padding: 8px; background-color: #e3f2fd; border-left: 4px solid #2196f3; border-radius: 4px;"><i class="fas fa-file-alt me-2"></i>PAGE $1</div>')
+                .replace(/=== END PAGE \d+ ===/g, '<div style="margin: 10px 0; color: #666; font-size: 0.9em; text-align: center; border-bottom: 1px dashed #ccc; padding-bottom: 10px;">--- End of Page ---</div>')
+                // Format paragraphs
+                .replace(/\n\n/g, '</p><p>')
+                .replace(/\n/g, '<br>')
+                // Wrap in paragraph tags
+                .replace(/^/, '<p>')
+                .replace(/$/, '</p>')
+                // Clean up empty paragraphs
+                .replace(/<p><\/p>/g, '')
+                .replace(/<p><br><\/p>/g, '<br>');
+        }
+        
+        function showExtractedText() {
+            // This function will be called when user clicks "View Extracted Text" button
+            if (extractionData && extractionData.data) {
+                const textData = extractionData.data.extracted_text || 'No extracted text available.';
+                displayExtractedDocxContent(textData, document.getElementById('pageNavigator'));
+            }
+        }
+        
+        function downloadDocument() {
+            const docUrl = `/document/${taskId}`;
+            const link = document.createElement('a');
+            link.href = docUrl;
+            link.download = extractionData?.filename || 'document.docx';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+        
+        function showUnsupportedDocument(extension) {
+            const documentContent = document.getElementById('documentContent');
+            const pageNavigator = document.getElementById('pageNavigator');
+            
+            if (pageNavigator) {
+                pageNavigator.style.display = 'none';
+            }
+            
+            documentContent.innerHTML = `
+                <div class="document-not-supported">
+                    <i class="fas fa-file-question fa-3x mb-3"></i>
+                    <p>Document preview not supported for .${extension} files</p>
+                    <a href="/document/${taskId}" target="_blank" class="btn btn-primary">
+                        <i class="fas fa-download me-2"></i>Download File
+                    </a>
+                </div>
+            `;
+        }
+        
+        function highlightPageMarkers(text) {
+            // Highlight page markers in text
+            return text
+                .replace(/=== PAGE (\d+) ===/g, '<div class="citation-highlight" id="page-$1" style="font-weight: bold; margin: 10px 0; padding: 5px; background-color: #e3f2fd; border-left: 4px solid #2196f3;">📄 PAGE $1</div>')
+                .replace(/=== END PAGE \d+ ===/g, '<div style="margin: 10px 0; color: #666; font-size: 0.9em;">--- End of Page ---</div>')
+                .replace(/\n/g, '<br>');
+        }
+        
+        function estimatePageCount(data) {
+            // Try to estimate page count from citations
+            let maxPage = 1;
+            
+            if (data.data && data.data.citations) {
+                Object.values(data.data.citations).forEach(sectionCitations => {
+                    if (typeof sectionCitations === 'object' && sectionCitations !== null) {
+                        Object.values(sectionCitations).forEach(citation => {
+                            if (typeof citation === 'string') {
+                                const pageMatch = citation.match(/page\s+(\d+)/i);
+                                if (pageMatch) {
+                                    maxPage = Math.max(maxPage, parseInt(pageMatch[1]));
+                                }
+                            }
+                        });
+                    }
+                });
+            }
+            
+            return maxPage;
+        }
+        
+        function navigateToPage(citation) {
+            console.log('Citation clicked:', citation);
+            
+            // Extract page number from citation
+            const pageMatch = citation.match(/page\s+(\d+)/i);
+            if (!pageMatch) {
+                console.log('No page number found in citation:', citation);
+                showPageNavigationFeedback('No page number found');
+                return;
+            }
+            
+            const pageNumber = parseInt(pageMatch[1]);
+            console.log('Navigating to page:', pageNumber);
+            
+            // Update page input in the navigator
+            const pageInput = document.getElementById('pageInput');
+            if (pageInput) {
+                pageInput.value = pageNumber;
+            }
+            
+            // Update current page tracking
+            if (window.currentPdfPage !== undefined) {
+                window.currentPdfPage = pageNumber;
+            }
+            
+            // Try different navigation methods based on document type
+            const iframe = document.getElementById('pdfFrame');
+            const textPageMarker = document.getElementById(`page-${pageNumber}`);
+            
+            if (iframe) {
+                // PDF navigation
+                navigatePdfToPage(iframe, pageNumber);
+            } else if (textPageMarker) {
+                // Text document navigation
+                navigateTextToPage(pageNumber);
+            } else {
+                // Fallback: open in new tab
+                window.open(`/document/${taskId}#page=${pageNumber}`, '_blank');
+            }
+            
+            showPageNavigationFeedback(pageNumber);
+        }
+        
+        function navigatePdfToPage(iframe, pageNumber) {
+            console.log('Navigating PDF to page:', pageNumber);
+            
+            // Update current page display
+            const currentPageDisplay = document.getElementById('currentPageDisplay');
+            if (currentPageDisplay) {
+                currentPageDisplay.textContent = pageNumber;
+            }
+            
+            // Method 1: Direct iframe src update with PDF fragment
+            try {
+                const baseUrl = iframe.src.split('#')[0];
+                const newUrl = `${baseUrl}#page=${pageNumber}`;
+                iframe.src = newUrl;
+                console.log('Updated iframe src to:', newUrl);
+            } catch (e) {
+                console.error('Failed to update iframe src:', e);
+            }
+            
+            // Method 2: Force iframe reload after short delay
+            setTimeout(() => {
+                try {
+                    const currentSrc = iframe.src;
+                    iframe.src = 'about:blank';
+                    setTimeout(() => {
+                        iframe.src = currentSrc;
+                    }, 100);
+                } catch (e) {
+                    console.log('Iframe reload failed:', e);
+                }
+            }, 1000);
+        }
+        
+        function navigateTextToPage(pageNumber) {
+            console.log('Navigating text document to page:', pageNumber);
+            
+            const pageMarker = document.getElementById(`page-${pageNumber}`);
+            if (pageMarker) {
+                // Smooth scroll to page marker
+                pageMarker.scrollIntoView({ 
+                    behavior: 'smooth', 
+                    block: 'center' 
+                });
+                
+                // Highlight the page marker
+                const originalBg = pageMarker.style.backgroundColor;
+                pageMarker.style.backgroundColor = '#ffd93d';
+                pageMarker.style.transform = 'scale(1.02)';
+                pageMarker.style.transition = 'all 0.3s ease';
+                
+                setTimeout(() => {
+                    pageMarker.style.backgroundColor = originalBg || '#e3f2fd';
+                    pageMarker.style.transform = 'scale(1)';
+                }, 2000);
+                
+                console.log('Successfully navigated to page marker:', pageNumber);
+            } else {
+                console.log('Page marker not found for page:', pageNumber);
+            }
+        }
+        
+        function goToPage() {
+            const pageInput = document.getElementById('pageInput');
+            const pageNumber = parseInt(pageInput.value);
+            
+            if (pageNumber && pageNumber > 0) {
+                navigateToPage(`Page ${pageNumber}`);
+            }
+        }
+        
+        // Additional helper functions for the PDF viewer
+        function onPdfFrameLoad() {
+            console.log('PDF frame loaded');
+            updateNavigationButtons();
+        }
+        
+        function reloadPdfFrame() {
+            const iframe = document.getElementById('pdfFrame');
+            if (iframe) {
+                const currentPage = window.currentPdfPage || 1;
+                const baseUrl = iframe.src.split('#')[0];
+                iframe.src = `${baseUrl}#page=${currentPage}`;
+            }
+        }
+        
+        function openPdfInNewTab() {
+            const currentPage = window.currentPdfPage || 1;
+            const pdfUrl = `/document/${taskId}#page=${currentPage}`;
+            window.open(pdfUrl, '_blank');
+        }
+        
+        function downloadPdf() {
+            const pdfUrl = `/document/${taskId}`;
+            const link = document.createElement('a');
+            link.href = pdfUrl;
+            link.download = extractionData?.filename || 'document.pdf';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+        
+        function updateNavigationButtons() {
+            const prevBtn = document.getElementById('prevPageBtn');
+            const nextBtn = document.getElementById('nextPageBtn');
+            const currentPage = window.currentPdfPage || 1;
+            const totalPages = window.totalPdfPages || 1;
+            
+            if (prevBtn) {
+                prevBtn.disabled = currentPage <= 1;
+            }
+            
+            if (nextBtn) {
+                nextBtn.disabled = currentPage >= totalPages;
+            }
+        }
+        
+        function goToPage() {
+            const pageInput = document.getElementById('pageInput');
+            const pageNumber = parseInt(pageInput.value);
+            
+            if (pageNumber && pageNumber > 0) {
+                const maxPages = parseInt(document.getElementById('totalPages').textContent) || 999;
+                if (pageNumber <= maxPages) {
+                    navigateToPage(`Page ${pageNumber}`);
+                } else {
+                    alert(`Page number must be between 1 and ${maxPages}`);
+                    pageInput.value = 1;
+                }
+            } else {
+                alert('Please enter a valid page number');
+                pageInput.value = 1;
+            }
+        }
+        
+        function tryAlternativePdfViewer() {
+            const documentContent = document.getElementById('documentContent');
+            const pdfUrl = `/document/${taskId}`;
+            
+            // Try Google Docs PDF viewer as alternative
+            documentContent.innerHTML = `
+                <div style="position: relative; height: 100%;">
+                    <iframe class="document-embed" 
+                            src="https://docs.google.com/viewer?url=${encodeURIComponent(window.location.origin + pdfUrl)}&embedded=true"
+                            frameborder="0">
+                        <div class="document-not-supported">
+                            <i class="fas fa-file-pdf fa-3x mb-3"></i>
+                            <p>Alternative PDF viewer also not supported.</p>
+                            <div class="mt-3">
+                                <a href="${pdfUrl}" target="_blank" class="btn btn-primary me-2">
+                                    <i class="fas fa-external-link-alt me-2"></i>Open in New Tab
+                                </a>
+                                <button class="btn btn-outline-primary" onclick="downloadPdf()">
+                                    <i class="fas fa-download me-2"></i>Download PDF
+                                </button>
+                            </div>
+                        </div>
+                    </iframe>
+                </div>
+            `;
+        }
+        
+        function downloadPdf() {
+            const pdfUrl = `/document/${taskId}`;
+            const link = document.createElement('a');
+            link.href = pdfUrl;
+            link.download = extractionData?.filename || 'document.pdf';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+        
+        function showPageNavigationFeedback(pageNumber) {
+            console.log('Showing navigation feedback for page:', pageNumber);
+            
+            // Create temporary notification
+            const notification = document.createElement('div');
+            notification.style.cssText = `
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                background: #007bff;
+                color: white;
+                padding: 10px 20px;
+                border-radius: 5px;
+                z-index: 2000;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+                transition: opacity 0.3s ease;
+                font-weight: 500;
+            `;
+            notification.innerHTML = `<i class="fas fa-search me-2"></i>Navigating to Page ${pageNumber}...`;
+            
+            document.body.appendChild(notification);
+            
+            // Check if navigation was successful after a delay
+            setTimeout(() => {
+                const pageInput = document.getElementById('pageInput');
+                const currentPage = pageInput ? parseInt(pageInput.value) : null;
+                
+                if (currentPage === pageNumber) {
+                    notification.innerHTML = `<i class="fas fa-check me-2"></i>Page ${pageNumber} loaded`;
+                    notification.style.background = '#28a745';
+                } else {
+                    notification.innerHTML = `<i class="fas fa-info-circle me-2"></i>Attempted navigation to Page ${pageNumber}`;
+                    notification.style.background = '#17a2b8';
+                }
+            }, 1000);
+            
+            setTimeout(() => {
+                notification.style.opacity = '0';
+                setTimeout(() => {
+                    if (notification.parentNode) {
+                        notification.parentNode.removeChild(notification);
+                    }
+                }, 300);
+            }, 3000);
+        }
+        
+        function toggleDocumentViewer() {
+            const documentViewer = document.getElementById('documentViewer');
+            const toggleBtn = document.getElementById('toggleViewerBtn');
+            const toggleText = document.getElementById('toggleViewerText');
+            
+            if (documentViewer.style.display === 'none') {
+                documentViewer.style.display = 'block';
+                toggleText.textContent = 'Hide Document';
+            } else {
+                documentViewer.style.display = 'none';
+                toggleText.textContent = 'Show Document';
+            }
         }
 
         function copyToClipboard() {

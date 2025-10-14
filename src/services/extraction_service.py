@@ -36,13 +36,14 @@ class LeaseExtractionService:
             logger.error(f"Failed to initialize LLM service: {str(e)}")
             raise
     
-    def extract_from_file(self, file_path: str, max_file_size_mb: int = 16) -> ExtractionResult:
+    def extract_from_file(self, file_path: str, max_file_size_mb: int = 16, direct_upload: bool = False) -> ExtractionResult:
         """
         Extract lease data from a document file.
         
         Args:
             file_path: Path to the document file
             max_file_size_mb: Maximum file size limit in MB
+            direct_upload: If True, send file directly to LLM instead of extracting text locally
             
         Returns:
             ExtractionResult containing the extracted data or error information
@@ -60,56 +61,71 @@ class LeaseExtractionService:
                     processing_time=time.time() - start_time,
                     file_info={'validation_failed': True}
                 )
-            
-            # Extract text from document
-            logger.info(f"Processing document: {Path(file_path).name}")
-            doc_result = self.document_processor.extract_text(file_path)
-            
-            if doc_result['processing_status'] == 'failed':
-                return ExtractionResult(
-                    success=False,
-                    error=f"Document processing failed: {doc_result.get('error', 'Unknown error')}",
-                    processing_time=time.time() - start_time,
-                    file_info=doc_result
-                )
-            
-            # Check if we have text to process
-            if not doc_result['text'] or len(doc_result['text'].strip()) < 100:
-                return ExtractionResult(
-                    success=False,
-                    error="Document contains insufficient text for processing",
-                    processing_time=time.time() - start_time,
-                    file_info=doc_result
-                )
-            
-            # Extract structured data using LLM with fallback
-            logger.info(f"Extracting structured data using {self.llm_service.provider.value} LLM")
-            llm_result = self._extract_with_fallback(doc_result['text'])
+
+            # Initialize variables
+            llm_result = None
+            file_info = {}
+
+            if direct_upload:
+                # Send file directly to LLM
+                logger.info(f"Sending file directly to LLM: {Path(file_path).name}")
+                llm_result = self._extract_with_direct_upload(file_path)
+                
+                # Create basic file info for direct upload
+                file_info = {
+                    'file_name': Path(file_path).name,
+                    'file_size': Path(file_path).stat().st_size,
+                    'processing_method': 'direct_upload',
+                    'processing_status': 'success'
+                }
+            else:
+                # Extract text from document locally first
+                logger.info(f"Processing document: {Path(file_path).name}")
+                doc_result = self.document_processor.extract_text(file_path)
+                
+                if doc_result['processing_status'] == 'failed':
+                    return ExtractionResult(
+                        success=False,
+                        error=f"Document processing failed: {doc_result.get('error', 'Unknown error')}",
+                        processing_time=time.time() - start_time,
+                        file_info=doc_result
+                    )
+                
+                # Check if we have text to process
+                if not doc_result['text'] or len(doc_result['text'].strip()) < 100:
+                    return ExtractionResult(
+                        success=False,
+                        error="Document contains insufficient text for processing",
+                        processing_time=time.time() - start_time,
+                        file_info=doc_result
+                    )
+                
+                # Extract structured data using LLM with fallback
+                logger.info(f"Extracting structured data using {self.llm_service.provider.value} LLM")
+                llm_result = self._extract_with_fallback(doc_result['text'])
+                file_info = doc_result
             
             if llm_result.get('extraction_status') == 'failed':
                 return ExtractionResult(
                     success=False,
                     error=f"LLM extraction failed: {llm_result.get('error', 'Unknown error')}",
                     processing_time=time.time() - start_time,
-                    file_info=doc_result
+                    file_info=file_info
                 )
             
             # Validate and create structured data
             try:
+                # Add extracted text to the result for document viewing
+                if not direct_upload and 'text' in file_info:
+                    llm_result['extracted_text'] = file_info['text']
+                
                 lease_data = LeaseAgreementData(**llm_result)
                 
                 return ExtractionResult(
                     success=True,
                     data=lease_data,
                     processing_time=time.time() - start_time,
-                    file_info={
-                        'file_name': doc_result.get('file_name'),
-                        'file_size': doc_result.get('file_size'),
-                        'file_extension': doc_result.get('file_extension'),
-                        'page_count': doc_result.get('page_count'),
-                        'extraction_method': doc_result.get('extraction_method'),
-                        'text_length': len(doc_result['text'])
-                    }
+                    file_info=file_info
                 )
                 
             except Exception as validation_error:
@@ -124,7 +140,7 @@ class LeaseExtractionService:
                         provider=llm_result.get('provider')
                     ),
                     processing_time=time.time() - start_time,
-                    file_info=doc_result,
+                    file_info=file_info,
                     error=f"Data validation warning: {str(validation_error)}"
                 )
         
@@ -133,7 +149,8 @@ class LeaseExtractionService:
             return ExtractionResult(
                 success=False,
                 error=f"Extraction failed: {str(e)}",
-                processing_time=time.time() - start_time
+                processing_time=time.time() - start_time,
+                file_info=file_info if 'file_info' in locals() else {}
             )
     
     def _extract_with_fallback(self, text: str) -> Dict[str, Any]:
@@ -194,6 +211,129 @@ class LeaseExtractionService:
             return {
                 'extraction_status': 'failed',
                 'error': f"Primary provider failed: {primary_result.get('error', 'Unknown error')}. Fallback failed: {str(fallback_error)}",
+                'provider': self.primary_provider
+            }
+
+    def _extract_with_direct_upload(self, file_path: str) -> Dict[str, Any]:
+        """
+        Extract data by sending file directly to LLM (for providers that support file uploads).
+        
+        Args:
+            file_path: Path to the document file
+            
+        Returns:
+            Dict containing extracted data or error information
+        """
+        try:
+            # Check if the current provider supports direct file upload
+            if hasattr(self.llm_service, 'extract_from_file'):
+                primary_result = self.llm_service.extract_from_file(file_path)
+                
+                # Special handling for DOCX files that fail with Gemini direct upload
+                if (primary_result.get('extraction_status') == 'failed' and 
+                    primary_result.get('suggested_method') == 'text_extraction' and
+                    Path(file_path).suffix.lower() == '.docx'):
+                    
+                    logger.info("DOCX direct upload failed, automatically falling back to text extraction")
+                    doc_result = self.document_processor.extract_text(file_path)
+                    
+                    if doc_result['processing_status'] == 'failed':
+                        return {
+                            'extraction_status': 'failed',
+                            'error': f"Both direct upload and text extraction failed for DOCX: {doc_result.get('error', 'Unknown error')}",
+                            'provider': self.primary_provider
+                        }
+                    
+                    if not doc_result['text'] or len(doc_result['text'].strip()) < 100:
+                        return {
+                            'extraction_status': 'failed',
+                            'error': "DOCX document contains insufficient text for processing",
+                            'provider': self.primary_provider
+                        }
+                    
+                    # Extract using text method
+                    primary_result = self.llm_service.extract_lease_data(doc_result['text'])
+                    primary_result['note'] = 'Automatically switched from direct upload to text extraction for DOCX file'
+            else:
+                # Fallback to text extraction for providers that don't support file upload
+                logger.warning(f"Provider {self.primary_provider} doesn't support direct file upload, falling back to text extraction")
+                doc_result = self.document_processor.extract_text(file_path)
+                
+                if doc_result['processing_status'] == 'failed':
+                    return {
+                        'extraction_status': 'failed',
+                        'error': f"Document processing failed: {doc_result.get('error', 'Unknown error')}",
+                        'provider': self.primary_provider
+                    }
+                
+                if not doc_result['text'] or len(doc_result['text'].strip()) < 100:
+                    return {
+                        'extraction_status': 'failed',
+                        'error': "Document contains insufficient text for processing",
+                        'provider': self.primary_provider
+                    }
+                
+                primary_result = self.llm_service.extract_lease_data(doc_result['text'])
+            
+            # If primary extraction succeeded, return it
+            if primary_result.get('extraction_status') != 'failed':
+                return primary_result
+            
+            # If fallback is disabled, return the error
+            if not self.enable_fallback:
+                return primary_result
+            
+            # Attempt fallback with direct upload if possible
+            fallback_provider = 'gemini' if self.primary_provider == 'openai' else 'openai'
+            
+            # Check if fallback provider is configured
+            import os
+            fallback_key = 'GEMINI_API_KEY' if fallback_provider == 'gemini' else 'OPENAI_API_KEY'
+            if not os.getenv(fallback_key):
+                logger.warning(f"Fallback to {fallback_provider} not possible: {fallback_key} not configured")
+                return primary_result
+            
+            try:
+                logger.warning(f"Direct upload with {self.primary_provider} failed, attempting fallback to {fallback_provider}")
+                
+                # Create fallback LLM service
+                fallback_service = LLMService(provider=fallback_provider)
+                
+                if hasattr(fallback_service, 'extract_from_file'):
+                    fallback_result = fallback_service.extract_from_file(file_path)
+                else:
+                    # Fallback to text extraction
+                    doc_result = self.document_processor.extract_text(file_path)
+                    if doc_result['processing_status'] == 'failed':
+                        return primary_result
+                    fallback_result = fallback_service.extract_lease_data(doc_result['text'])
+                
+                if fallback_result.get('extraction_status') != 'failed':
+                    logger.info(f"Fallback to {fallback_provider} succeeded")
+                    fallback_result['fallback_used'] = True
+                    fallback_result['primary_provider'] = self.primary_provider
+                    fallback_result['fallback_provider'] = fallback_provider
+                    return fallback_result
+                else:
+                    return {
+                        'extraction_status': 'failed',
+                        'error': f"Both providers failed. {self.primary_provider}: {primary_result.get('error', 'Unknown error')}; {fallback_provider}: {fallback_result.get('error', 'Unknown error')}",
+                        'provider': f"{self.primary_provider} (failed), {fallback_provider} (failed)"
+                    }
+                    
+            except Exception as fallback_error:
+                logger.error(f"Fallback provider initialization failed: {str(fallback_error)}")
+                return {
+                    'extraction_status': 'failed',
+                    'error': f"Primary provider failed: {primary_result.get('error', 'Unknown error')}. Fallback failed: {str(fallback_error)}",
+                    'provider': self.primary_provider
+                }
+                
+        except Exception as e:
+            logger.error(f"Direct upload extraction failed: {str(e)}")
+            return {
+                'extraction_status': 'failed',
+                'error': f"Direct upload extraction failed: {str(e)}",
                 'provider': self.primary_provider
             }
 

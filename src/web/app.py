@@ -8,7 +8,7 @@ import uuid
 import logging
 from pathlib import Path
 from datetime import datetime
-from flask import Flask, render_template, request, jsonify, redirect, url_for, flash
+from flask import Flask, render_template, request, jsonify, redirect, url_for, flash, send_file
 from werkzeug.utils import secure_filename
 
 # Import our services
@@ -82,8 +82,9 @@ class LeaseExtractionApp:
                 
                 file.save(file_path)
                 
-                # Get LLM provider from request
+                # Get LLM provider and processing method from request
                 llm_provider = request.form.get('llm_provider', 'openai')
+                direct_upload = request.form.get('direct_upload', 'false').lower() == 'true'
                 
                 # Process the file
                 try:
@@ -91,21 +92,20 @@ class LeaseExtractionApp:
                         # Reinitialize service with new provider and fallback enabled
                         self.extraction_service = LeaseExtractionService(llm_provider, enable_fallback=True)
                     
-                    result = self.extraction_service.extract_from_file(str(file_path))
+                    result = self.extraction_service.extract_from_file(str(file_path), direct_upload=direct_upload)
                     
-                    # Store result
+                    # Store result with file info for document viewing
                     self.results_storage[task_id] = {
                         'result': result,
                         'filename': filename,
+                        'file_path': str(file_path),  # Store file path for document viewing
                         'timestamp': datetime.now().isoformat(),
-                        'llm_provider': llm_provider
+                        'llm_provider': llm_provider,
+                        'processing_method': 'direct_upload' if direct_upload else 'text_extraction'
                     }
                     
-                    # Clean up uploaded file
-                    try:
-                        file_path.unlink()
-                    except:
-                        pass  # Ignore cleanup errors
+                    # Note: Don't clean up file immediately - keep for document viewing
+                    # File cleanup can be handled by a separate background process  # Ignore cleanup errors
                     
                     # Enhanced error message handling
                     message = 'Processing completed'
@@ -142,12 +142,7 @@ class LeaseExtractionApp:
                     return jsonify(response_data)
                     
                 except Exception as e:
-                    # Clean up uploaded file
-                    try:
-                        file_path.unlink()
-                    except:
-                        pass
-                    
+                    # Don't clean up file on error - keep for potential document viewing
                     return jsonify({'error': f'Processing failed: {str(e)}'}), 500
                 
             except Exception as e:
@@ -169,7 +164,8 @@ class LeaseExtractionApp:
                 'file_info': result.file_info,
                 'filename': stored_result['filename'],
                 'timestamp': stored_result['timestamp'],
-                'llm_provider': stored_result['llm_provider']
+                'llm_provider': stored_result['llm_provider'],
+                'processing_method': stored_result.get('processing_method', 'text_extraction')
             }
             
             if result.error:
@@ -187,12 +183,53 @@ class LeaseExtractionApp:
             task_id = request.args.get('task_id')
             if not task_id:
                 return redirect(url_for('index'))
-            
+
             if task_id not in self.results_storage:
                 flash('Result not found', 'error')
                 return redirect(url_for('index'))
-            
+
             return render_template('results.html', task_id=task_id)
+        
+        @self.app.route('/document/<task_id>')
+        def view_document(task_id):
+            """Serve the uploaded document for viewing."""
+            if task_id not in self.results_storage:
+                return jsonify({'error': 'Document not found'}), 404
+            
+            try:
+                stored_result = self.results_storage[task_id]
+                filename = stored_result['filename']
+                
+                # Look for the file in uploads folder
+                file_path = None
+                for file in self.upload_folder.glob(f"{task_id}_*"):
+                    if file.name.endswith(filename.split('.')[-1]):
+                        file_path = file
+                        break
+                
+                if not file_path or not file_path.exists():
+                    return jsonify({'error': 'Document file not found'}), 404
+                
+                # Determine content type based on file extension
+                ext = filename.lower().split('.')[-1]
+                content_type_map = {
+                    'pdf': 'application/pdf',
+                    'txt': 'text/plain',
+                    'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                    'doc': 'application/msword'
+                }
+                
+                content_type = content_type_map.get(ext, 'application/octet-stream')
+                
+                return send_file(
+                    file_path,
+                    mimetype=content_type,
+                    as_attachment=False,
+                    download_name=filename
+                )
+                
+            except Exception as e:
+                return jsonify({'error': f'Failed to serve document: {str(e)}'}), 500
         
         @self.app.route('/api/test')
         def test_services():
@@ -261,6 +298,7 @@ if __name__ == '__main__':
     # Get configuration from environment
     llm_provider = os.getenv('DEFAULT_LLM_PROVIDER', 'openai')
     upload_folder = os.getenv('UPLOAD_FOLDER', 'uploads')
+    port = int(os.getenv('PORT', 5000))
     debug = os.getenv('FLASK_ENV') == 'development'
     
     # Create and run app
@@ -268,6 +306,6 @@ if __name__ == '__main__':
     print(f"Starting Lease Agreement Extraction Tool...")
     print(f"LLM Provider: {llm_provider}")
     print(f"Upload folder: {upload_folder}")
-    print("Open http://localhost:5000 in your browser")
+    print(f"Open http://localhost:{port} in your browser")
     
-    app.run(debug=debug)
+    app.run(debug=debug, port=port)
